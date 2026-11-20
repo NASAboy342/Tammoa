@@ -1,0 +1,18 @@
+# .NET
+bin/
+obj/
+*.user
+Deployed/
+TestResults/
+
+# Frontend
+node_modules/
+dist/
+test-results/
+playwright-report/
+
+# Local / secrets (API keys for model cards must never be committed)
+.env*
+*.local
+appsettings.Local.json
+.DS_Store

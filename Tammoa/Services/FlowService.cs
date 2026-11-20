@@ -16,11 +16,13 @@ public class FlowService : IFlowService
 
     private readonly IFlowRepository _repository;
     private readonly TimeProvider _time;
+    private readonly IFlowDefinitionValidator _validator;
 
-    public FlowService(IFlowRepository repository, TimeProvider time)
+    public FlowService(IFlowRepository repository, TimeProvider time, IFlowDefinitionValidator validator)
     {
         _repository = repository;
         _time = time;
+        _validator = validator;
     }
 
     public IReadOnlyList<FlowSummary> List() =>
@@ -146,14 +148,11 @@ public class FlowService : IFlowService
         return trimmed;
     }
 
-    private static JObject ValidDefinition(JObject definition)
+    private JObject ValidDefinition(JObject definition)
     {
-        if (definition["nodes"] is { } nodes && nodes is not JArray)
-            throw new ArgumentException("definition.nodes must be an array.");
-        if (definition["edges"] is { } edges && edges is not JArray)
-            throw new ArgumentException("definition.edges must be an array.");
         if (definition.ToString(Newtonsoft.Json.Formatting.None).Length > MaxDefinitionLength)
             throw new ArgumentException("The flow definition is too large.");
+        _validator.Validate(definition);
         return definition;
     }
 }

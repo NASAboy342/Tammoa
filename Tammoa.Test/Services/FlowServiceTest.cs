@@ -17,6 +17,7 @@ public class FlowServiceTest
     private static readonly DateTimeOffset T0 = new(2026, 1, 1, 12, 0, 0, TimeSpan.Zero);
     private IFlowRepository _repo = null!;
     private FixedTime _time = null!;
+    private IFlowDefinitionValidator _validator = null!;
     private FlowService _sut = null!;
 
     [SetUp]
@@ -25,7 +26,8 @@ public class FlowServiceTest
         _repo = Substitute.For<IFlowRepository>();
         _repo.Update(Arg.Any<Flow>()).Returns(true);
         _time = new FixedTime(T0);
-        _sut = new FlowService(_repo, _time);
+        _validator = Substitute.For<IFlowDefinitionValidator>();
+        _sut = new FlowService(_repo, _time, _validator);
     }
 
     private static Flow Existing(string name = "Daily report", bool enabled = false, JObject? def = null) =>
@@ -121,10 +123,20 @@ public class FlowServiceTest
     }
 
     [Test]
-    public void Update_NodesNotAnArray_ThrowsArgumentException()
+    public void Update_ValidatorRejectsDefinition_ThrowsArgumentExceptionAndDoesNotSave()
     {
         _repo.Get("abc").Returns(Existing());
+        _validator.When(v => v.Validate(Arg.Any<JObject>())).Do(_ => throw new ArgumentException("bad graph"));
         Assert.Throws<ArgumentException>(() => _sut.Update("abc", new UpdateFlowRequest("x", "", JObject.Parse("{\"nodes\":5}"))));
+        _repo.DidNotReceive().Update(Arg.Any<Flow>());
+    }
+
+    [Test]
+    public void Import_ValidatorRejectsDefinition_ThrowsArgumentException()
+    {
+        _validator.When(v => v.Validate(Arg.Any<JObject>())).Do(_ => throw new ArgumentException("bad graph"));
+        Assert.Throws<ArgumentException>(() => _sut.Import(new FlowDocument("tammoa.flow", 1, "x", "", JObject.Parse("{}"))));
+        _repo.DidNotReceive().Insert(Arg.Any<Flow>());
     }
 
     [Test]

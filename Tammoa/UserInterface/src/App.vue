@@ -1,13 +1,19 @@
 <script setup lang="ts">
-import { onMounted } from 'vue'
+import { onMounted, onUnmounted } from 'vue'
 import { RouterLink, RouterView } from 'vue-router'
 import AppIcon from '@/components/icons/AppIcon.vue'
 import { useAppStore } from '@/stores/appStore'
+import { useRunStore } from '@/stores/runStore'
 import { useThemeStore } from '@/stores/themeStore'
 
 const theme = useThemeStore()
 const app = useAppStore()
-onMounted(app.load)
+const runs = useRunStore()
+onMounted(() => {
+  void app.load()
+  runs.connect() // live run state is pushed by the backend
+})
+onUnmounted(() => runs.disconnect())
 </script>
 
 <template>

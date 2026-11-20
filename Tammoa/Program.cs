@@ -6,6 +6,7 @@ using Tammoa.Api;
 using Tammoa.Helper;
 using Tammoa.Repositories;
 using Tammoa.Services;
+using Tammoa.Services.Cards;
 
 namespace Tammoa;
 
@@ -26,10 +27,23 @@ internal static class Program
         services.AddSingleton(TimeProvider.System);
         services.AddSingleton<IFlowRepository>(_ => new FlowRepository(DataPaths.DatabaseFile()));
         services.AddSingleton<IFlowService, FlowService>();
+        services.AddSingleton<ITemplateEngine, TemplateEngine>();
+        services.AddSingleton<IProcessRunner, ProcessRunner>();
+        services.AddSingleton<ICardType, ManualTriggerCard>();
+        services.AddSingleton<ICardType, SetValueCard>();
+        services.AddSingleton<ICardType, ShellScriptCard>();
+        services.AddSingleton<ICardRegistry, CardRegistry>();
+        services.AddSingleton<IFlowDefinitionValidator, FlowDefinitionValidator>();
+        services.AddSingleton<IFlowExecutor, FlowExecutor>();
+        services.AddSingleton<IRunRepository, RunRepository>();
+        services.AddSingleton<IRunEventBus, RunEventBus>();
+        services.AddSingleton<IRunService, RunService>();
         using var provider = services.BuildServiceProvider();
 
         app.MapAppEndpoints(provider.GetRequiredService<IAppInfoService>());
         app.MapFlowEndpoints(provider.GetRequiredService<IFlowService>());
+        app.MapCardEndpoints(provider.GetRequiredService<ICardRegistry>());
+        app.MapRunEndpoints(provider.GetRequiredService<IRunService>(), provider.GetRequiredService<IRunEventBus>());
 
 #if DEBUG
         var appUrl = "http://localhost:5173"; // Vite dev server (hot reload)

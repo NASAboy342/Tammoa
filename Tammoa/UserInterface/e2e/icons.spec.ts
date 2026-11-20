@@ -57,6 +57,39 @@ test('flows with rows, the edit page and all three dialogs: every clickable has 
   expect(await withoutIcon(page), 'delete dialog on edit page').toEqual([])
 })
 
+test('the card editor (palette, selected card, run panel, running state): every clickable has an icon', async ({ page, request }) => {
+  const flow = await (await request.post('/api/flows', { data: { name: `Editor ${Date.now()}`, description: '' } })).json()
+  const nodes = [
+    { id: 't', type: 'trigger.manual', name: 'Manual trigger', position: { x: 0, y: 0 }, params: {} },
+    { id: 'c', type: 'script.shell', name: 'Script', position: { x: 280, y: 0 }, params: { command: 'sleep 3' } },
+  ]
+  await request.put(`/api/flows/${flow.id}`, { data: { name: flow.name, description: '', definition: { nodes, edges: [{ id: 'e1', source: 't', target: 'c' }] } } })
+  await page.goto(`/#/flows/${flow.id}`)
+  await expect(page.getByTestId('canvas')).toBeVisible()
+  await expect(page.getByTestId('node-c')).toBeVisible()
+  expect(await withoutIcon(page), 'editor, nothing selected').toEqual([])
+
+  await page.getByTestId('palette-toggle').click()
+  await expect(page.getByTestId('palette')).toBeVisible()
+  expect(await withoutIcon(page), 'palette open').toEqual([])
+  await page.keyboard.press('Escape')
+
+  await page.getByTestId('node-c').click()
+  await expect(page.getByTestId('inspector')).toBeVisible()
+  expect(await withoutIcon(page), 'card selected (inspector with all param kinds)').toEqual([])
+
+  await page.getByTestId('run').click()
+  await expect(page.locator('[data-testid^="run-cancel-"]')).toBeVisible()
+  expect(await withoutIcon(page), 'a run is running (cancel button, spinner)').toEqual([])
+  await page.locator('[data-testid^="run-cancel-"]').click()
+  await expect(page.locator('[data-testid^="run-row-"]').first()).toHaveAttribute('data-status', 'cancelled')
+  expect(await withoutIcon(page), 'after the run').toEqual([])
+
+  await page.locator('[data-testid="edge-e1"] path').last().click({ force: true })
+  await expect(page.getByTestId('edge-delete')).toBeVisible()
+  expect(await withoutIcon(page), 'connection selected').toEqual([])
+})
+
 test('the audit really looks at the controls (not an empty selection)', async ({ page }) => {
   await page.goto(ROUTES[0])
   await page.getByTestId('flows').waitFor()

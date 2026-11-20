@@ -11,7 +11,7 @@ public static class JsonHelper
     {
         ContractResolver = new CamelCasePropertyNamesContractResolver(), // keeps the Vue side camelCase
         NullValueHandling = NullValueHandling.Ignore,
-        Converters = { new StringEnumConverter() },
+        Converters = { new StringEnumConverter(new CamelCaseNamingStrategy()) }, // enums travel as camelCase names
     };
 
     public static string Serialize(object? value) => JsonConvert.SerializeObject(value, Settings);

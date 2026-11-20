@@ -7,6 +7,13 @@ A desktop app for building AI-agent automations from modular **cards** (inspired
 - Flows are stored in a local SQLite file in your user data folder (`~/Library/Application Support/Tammoa` on macOS, `%APPDATA%\Tammoa` on Windows). Set `TAMMOA_DATA_DIR` to use another folder (handy for testing).
 - Flows can be exported/imported as a portable JSON document through the API (`GET /api/flows/{id}/export`, `POST /api/flows/import`); UI buttons come later.
 
+## Building and running a flow
+1. Open a flow. **Add card** lists the card types: *Manual trigger*, *Script*, *Set value*.
+2. Drag cards where you like, drag from a card's right dot onto another card to connect them, click a card to edit its settings on the right. **Save**.
+3. Type something in *Run input* (text or JSON, optional) and press **Run**. The backend executes the flow; cards show running / succeeded / failed / skipped live, and clicking a card shows its output or error. **Cancel** stops a run. You can start several runs at once, even of the same flow.
+- Data moves from card to card: use `{{input.stdout}}` (the previous card's output) and `{{run.input}}` in card settings. Put values in shell commands with `{{input.text | sh}}` so quotes and spaces cannot break the command.
+- Everything runs in the backend, the window only displays the state. Run history is kept in memory, so it is lost when the app closes. Loops, schedules and model cards are not built yet.
+
 ## Vision (mostly not built yet)
 - **Card canvas** with connections, like n8n; flows saved as JSON.
 - **Trigger cards**: manual click, passed-in prompt/value, schedule.

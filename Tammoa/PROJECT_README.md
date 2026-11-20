@@ -5,6 +5,7 @@
 ## Structure
 - `Program.cs` — composition root: static file server (sealed DI) + a separate `ServiceCollection` for app services, window creation. Debug loads Vite (5173); Release loads the embedded UI with a `?v=` cache-buster.
 - `Api/` — `Map<Feature>Endpoints(this WebApplication, I<Feature>Service)` per feature.
+- `Services/Cards/` — one class per card type (`ICardType`), registered in `Program.cs`; `ICardRegistry` serves the catalogue. **To add a card: implement `ICardType` (+ its `CardTypeInfo` with param descriptors) and register it. No UI change is needed**, the UI draws cards and their forms from `GET /api/cards/types`.
 - `Models/ Services/ Repositories/ Enum/ Helper/` — conventions in the Foundation repo (`backend-conventions.md`). `Enum/` types use namespace `Tammoa.Enums`.
 - `Helper/JsonHelper` — Newtonsoft.Json (camelCase, nulls ignored, enums as strings). Never `System.Text.Json`.
 - `Helper/EndpointHelpers` — `Try`/`TrySync`: `ArgumentException` → 400, `InvalidOperationException` → 409, else 500.
@@ -17,6 +18,16 @@
 ## Conventions
 DI always, no `new` services in endpoints, JSON via `JsonHelper`. `EndpointHelpers` maps `ArgumentException` → 400, `KeyNotFoundException` → 404, `InvalidOperationException` → 409. Time comes from an injected `TimeProvider`.
 
+## Cards, runs and the engine (everything executes in the backend)
+- **Definition** (stored in the flow row, validated by `FlowDefinitionValidator` on every save and import): `{ schemaVersion, nodes: [{ id, type, name, position:{x,y}, params }], edges: [{ id, source, target }] }`. Rules: known card types, unique ids, edges point at existing cards, no self/duplicate links, triggers have no input, **no cycles** (`TODO(loop card)`), max 200 cards.
+- **Data flow:** a card's `input` is its parent's output (an array of outputs when it has several parents; null for a trigger). Templates in params: `{{input.path[0].x}}`, `{{run.input}}`; a string that is exactly one `{{ }}` keeps its JSON type; filters `| json`, `| sh` (POSIX quoting; `TODO` Windows). Missing paths give empty text / null. Template values are inserted as-is: use `| sh` whenever a value goes into a shell command.
+- **Engine** (`FlowExecutor`): cards whose parents all succeeded run concurrently; a failed card makes everything downstream `skipped` and stops scheduling new cards; cancel marks unfinished cards `cancelled`; cards not reachable from a trigger are `skipped`. Config errors (`ArgumentException`) and work errors (`InvalidOperationException`) become the card's `error`.
+- **Runs** (`RunService`): `POST /api/flows/{id}/runs` returns `202` + the first snapshot at once and runs in the background; any number of runs execute at the same time. The run uses the definition as it was when started. **Snapshots are immutable and carry a `revision`** that grows with every change: clients keep the highest revision (a pushed event and a fetched reply can arrive in either order).
+- **Live state:** `GET /api/events` is a server-sent-events stream of complete run snapshots (`event: run`), 15 s keep-alive comments, per-subscriber buffer that drops the oldest. The UI holds no run logic; it displays what arrives.
+- **Cards v1:** `trigger.manual` (output `{input}`), `script.shell` (`sh -c` / `cmd /c`; output `{stdout, stderr, exitCode, timedOut, truncated}`; 64 KB output cap per stream; timeout 1-600 s default 30; working dir default = home; non-zero exit fails the card unless `failOnError` is off), `data.set` (JSON object with templates).
+- **Stubs / not built:** run history is in memory only (`RunRepository`, lost on restart; `TODO(persist runs)`); `enabled` flows do nothing yet (no scheduler/triggers); loops; model cards.
+- **Security note:** the script card runs arbitrary commands as the current user. It is a local desktop app and the user writes the flows, but never run an imported flow you have not read.
+
 ## Flow files (export / import)
 A flow is portable: `GET /api/flows/{id}/export` returns a `FlowDocument` `{format: "tammoa.flow", version: 1, name, description, definition}` — no id, enabled state or timestamps. `POST /api/flows/import` creates a new, disabled flow from one (400 on wrong format or a newer `version`). `definition.schemaVersion` versions the card JSON itself for future migrations. **Never put secrets (API keys) in a definition**: cards must reference credentials by name, so exported files are safe to share.
 
@@ -24,4 +35,5 @@ A flow is portable: `GET /api/flows/{id}/export` returns a `FlowDocument` `{form
 | Date | Feature | Notes |
 |---|---|---|
 | 2026-11-20 | Scaffold | `GET /api/health`, `GET /api/app/version` |
+| 2026-11-20 | Card engine | `Services/Cards/*`, `TemplateEngine`, `FlowDefinitionValidator`, `FlowExecutor`, `RunService`, `RunEventBus`, `ProcessRunner`, in-memory `RunRepository`; endpoints `GET /api/cards/types`, `POST/GET /api/flows/{id}/runs`, `GET /api/runs/{id}`, `POST /api/runs/{id}/cancel`, `GET /api/events` (SSE). Flow save/import now validate the card graph (400 with a reason). `404` for `KeyNotFoundException`. Stubs listed above. |
 | 2026-11-20 | Flows | `Api/FlowEndpoints`, `Services/FlowService`, `Repositories/FlowRepository` (SQLite). `GET/POST /api/flows`, `GET/PUT/DELETE /api/flows/{id}`, `POST /api/flows/{id}/enable|disable|duplicate`, `GET /api/flows/{id}/export`, `POST /api/flows/import`. Delete requires `{confirmName}` equal to the flow name exactly (400 otherwise). New/duplicated/imported flows start disabled. **Stub:** `enabled` is only a flag, nothing activates triggers until the run engine exists (`TODO(run engine)` in `IFlowService`). |

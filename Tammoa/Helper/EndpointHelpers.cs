@@ -6,7 +6,7 @@ public static class EndpointHelpers
 {
     /// <summary>
     /// Runs an endpoint body and maps exceptions to HTTP status codes:
-    /// ArgumentException → 400, InvalidOperationException → 409, anything else → 500 (logged).
+    /// ArgumentException → 400, KeyNotFoundException → 404, InvalidOperationException → 409, anything else → 500 (logged).
     /// </summary>
     public static async Task<IResult> Try(Func<Task<IResult>> body)
     {
@@ -17,6 +17,10 @@ public static class EndpointHelpers
         catch (ArgumentException ex)
         {
             return JsonHelper.Ok(new { error = ex.Message }, StatusCodes.Status400BadRequest);
+        }
+        catch (KeyNotFoundException ex)
+        {
+            return JsonHelper.Ok(new { error = ex.Message }, StatusCodes.Status404NotFound);
         }
         catch (InvalidOperationException ex)
         {

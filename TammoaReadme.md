@@ -2,7 +2,12 @@
 
 A desktop app for building AI-agent automations from modular **cards** (inspired by n8n): wire triggers, model cards, script cards and loops into flows, and customise how the agent loop works from the UI. Built so a small local model (e.g. Qwen3 14B via Ollama) can run a lean, hand-designed loop instead of a heavy CLI agent with a big system prompt and tool list.
 
-## Vision (not built yet — the scaffold is a "hello" skeleton)
+## Using it now
+- **Flows** (home): create with *New flow*, open a flow to rename it or change its description, switch it *Enabled/Disabled* (a flag for now; nothing runs yet), duplicate, or delete. Deleting asks you to type the flow's exact name.
+- Flows are stored in a local SQLite file in your user data folder (`~/Library/Application Support/Tammoa` on macOS, `%APPDATA%\Tammoa` on Windows). Set `TAMMOA_DATA_DIR` to use another folder (handy for testing).
+- Flows can be exported/imported as a portable JSON document through the API (`GET /api/flows/{id}/export`, `POST /api/flows/import`); UI buttons come later.
+
+## Vision (mostly not built yet)
 - **Card canvas** with connections, like n8n; flows saved as JSON.
 - **Trigger cards**: manual click, passed-in prompt/value, schedule.
 - **Model cards**: Anthropic API, OpenAI API, local Ollama, remote Ollama server (API keys kept out of git).
@@ -34,7 +39,7 @@ Use the `stop-test` skill. Ports: 5173, 8000. Process match: `bin/Debug/net8.0/T
 
 ## Tests
 - Backend: `dotnet test`
-- Frontend unit: `npm run test:unit` (in `Tammoa/UserInterface`); e2e: `npx playwright test` (needs both dev servers running)
+- Frontend unit: `npm run test:unit` (in `Tammoa/UserInterface`); e2e: `npx playwright test` (needs both dev servers running; start the backend with `TAMMOA_DATA_DIR=<temp folder>` so tests never touch your real flows)
 
 ## Build
 ```bash

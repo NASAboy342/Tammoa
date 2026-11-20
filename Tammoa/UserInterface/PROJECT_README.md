@@ -5,12 +5,14 @@ Vite, Pinia (setup stores), vue-router (hash history), Vitest, Playwright. UI te
 ## Structure
 ```
 src/main.ts  App.vue            bootstrap + shell (header, theme toggle)
-src/views/                      one component per route
+src/views/                      FlowsView (list), FlowEditView (/flows/:id)
 src/components/icons/           AppIcon.vue + icons.ts (+ __tests__)
-src/stores/                     appStore (backend version), themeStore
+src/stores/                     appStore (backend version), flowStore (list + actions), themeStore
+src/components/                 FlowSwitch, FlowFormDialog, DeleteFlowDialog, ModalShell, forms/IconField
+src/helpers/                    flowHelpers (pure logic + spec)
 src/services/                   httpClient.ts (requestJson<T>) + <feature>Api.ts mirroring Api/*Endpoints.cs
 src/router/index.ts             lazy routes
-e2e/                            Playwright: home.spec.ts, icons.spec.ts (icon audit)
+e2e/                            Playwright: app.spec.ts, flows.spec.ts, icons.spec.ts (icon audit incl. dialogs)
 ```
 
 ## Conventions
@@ -23,4 +25,5 @@ e2e/                            Playwright: home.spec.ts, icons.spec.ts (icon au
 ## Feature log
 | Date | Feature | Notes |
 |---|---|---|
-| 2026-11-20 | Scaffold | Home view showing backend version, theme toggle |
+| 2026-11-20 | Scaffold | Backend version pill + theme toggle in the header |
+| 2026-11-20 | Flows | `/` lists flows (name, description, card count, updated, enable switch, duplicate, delete); `New flow` dialog → opens `/flows/:id`; edit page: name, description, enable switch, delete, read-only cards/connections count (definition is round-tripped untouched; no canvas yet). Delete always goes through `DeleteFlowDialog`: type the exact flow name to unlock the button (backend re-checks). Fully wired to `/api/flows`. Export/import: API client (`flowApi.exportDocument/importDocument`) exists, **no UI yet**. |

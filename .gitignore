@@ -16,3 +16,8 @@ playwright-report/
 *.local
 appsettings.Local.json
 .DS_Store
+
+# Local data (SQLite)
+*.db
+*.db-wal
+*.db-shm

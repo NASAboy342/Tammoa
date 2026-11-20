@@ -3,6 +3,8 @@ using Microsoft.Extensions.DependencyInjection;
 using Photino.NET;
 using Photino.NET.Server;
 using Tammoa.Api;
+using Tammoa.Helper;
+using Tammoa.Repositories;
 using Tammoa.Services;
 
 namespace Tammoa;
@@ -21,9 +23,13 @@ internal static class Program
 
         var services = new ServiceCollection();
         services.AddSingleton<IAppInfoService, AppInfoService>();
+        services.AddSingleton(TimeProvider.System);
+        services.AddSingleton<IFlowRepository>(_ => new FlowRepository(DataPaths.DatabaseFile()));
+        services.AddSingleton<IFlowService, FlowService>();
         using var provider = services.BuildServiceProvider();
 
         app.MapAppEndpoints(provider.GetRequiredService<IAppInfoService>());
+        app.MapFlowEndpoints(provider.GetRequiredService<IFlowService>());
 
 #if DEBUG
         var appUrl = "http://localhost:5173"; // Vite dev server (hot reload)

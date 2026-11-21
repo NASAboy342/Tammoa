@@ -181,8 +181,62 @@ public class MoreCardsTest
     }
 
     [Test]
-    public void Read_MissingFile_Throws() =>
-        Assert.ThrowsAsync<InvalidOperationException>(() => new ReadFileCard(T).ExecuteAsync(Ctx(Json(new { path = Path.Combine(_dir, "nope.txt") })), default));
+    public async Task Read_MissingFile_GivesEmptyText_AndCreatesNothing_ByDefault()
+    {
+        var path = Path.Combine(_dir, "deep", "nope.txt");
+        var r = (await new ReadFileCard(T).ExecuteAsync(Ctx(Json(new { path })), default)).Output;
+        Assert.That((string?)r["text"], Is.EqualTo(""));
+        Assert.That((long)r["size"]!, Is.EqualTo(0));
+        Assert.That((bool)r["exists"]!, Is.False);
+        Assert.That((string?)r["path"], Is.EqualTo(path));
+        Assert.That(Directory.Exists(Path.Combine(_dir, "deep")), Is.False);
+    }
+
+    [Test]
+    public async Task Read_MissingFile_WithTheSwitchOff_IsTheSameAsDefault()
+    {
+        var path = Path.Combine(_dir, "off.txt");
+        var r = (await new ReadFileCard(T).ExecuteAsync(Ctx(Json(new { path, createIfMissing = false })), default)).Output;
+        Assert.That((string?)r["text"], Is.EqualTo(""));
+        Assert.That(File.Exists(path), Is.False);
+    }
+
+    [Test]
+    public async Task Read_MissingFile_WithTheSwitchOn_CreatesTheEmptyFileAndFolders()
+    {
+        var path = Path.Combine(_dir, "a", "b", "made.txt");
+        var card = new ReadFileCard(T);
+        var r = (await card.ExecuteAsync(Ctx(Json(new { path, createIfMissing = true })), default)).Output;
+        Assert.That(File.Exists(path), Is.True);
+        Assert.That(new FileInfo(path).Length, Is.EqualTo(0));
+        Assert.That((string?)r["text"], Is.EqualTo(""));
+        Assert.That((bool)r["exists"]!, Is.False); // it did not exist when read
+        File.WriteAllText(path, "later");
+        var again = (await card.ExecuteAsync(Ctx(Json(new { path, createIfMissing = true })), default)).Output;
+        Assert.That((string?)again["text"], Is.EqualTo("later")); // an existing file is never touched
+        Assert.That((bool)again["exists"]!, Is.True);
+    }
+
+    [Test]
+    public async Task Read_ExistingFile_ReportsItExists()
+    {
+        Directory.CreateDirectory(_dir);
+        var path = Path.Combine(_dir, "here.txt");
+        File.WriteAllText(path, "hi");
+        var r = (await new ReadFileCard(T).ExecuteAsync(Ctx(Json(new { path })), default)).Output;
+        Assert.That((bool)r["exists"]!, Is.True);
+    }
+
+    [Test]
+    public void Read_APathThatIsAFolder_Throws()
+    {
+        Directory.CreateDirectory(_dir);
+        Assert.ThrowsAsync<InvalidOperationException>(() => new ReadFileCard(T).ExecuteAsync(Ctx(Json(new { path = _dir, createIfMissing = true })), default));
+    }
+
+    [Test]
+    public void Read_TemplatedMissingPath_StillNeedsAnAbsolutePath() =>
+        Assert.ThrowsAsync<ArgumentException>(() => new ReadFileCard(T).ExecuteAsync(Ctx(Json(new { path = "nope.txt", createIfMissing = true })), default));
 
     [Test]
     public void Read_OverTheSizeLimit_Throws()

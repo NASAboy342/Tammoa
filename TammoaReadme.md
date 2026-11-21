@@ -16,7 +16,7 @@ A desktop app for building AI-agent automations from modular **cards** (inspired
 | Set value, JSON, Merge | build, parse, stringify and combine data |
 | Script | run **Shell, JavaScript (needs Node) or Python (needs python3)**; read the input from `$TAMMOA_INPUT` (JSON); print JSON to use it in the next card as `{{input.json.x}}` |
 | HTTP Request | call a web API |
-| Read file, Write file | read or write a text file |
+| Read file, Write file | read or write a text file. A missing file is read as empty text (`exists` is false); switch on *Create the file* to create it and its folders |
 | Ollama | ask a local or remote Ollama model (create a connection first) |
 
 ## Reusable data: the Data card

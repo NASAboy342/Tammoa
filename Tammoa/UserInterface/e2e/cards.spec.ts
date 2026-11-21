@@ -33,6 +33,40 @@ test.describe('the new cards, end to end through the backend engine', () => {
     }
   })
 
+  test('reading a missing file gives empty text; the switch creates the file and its folders instead; the switch works in the editor', async ({ page, request }) => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'tammoa-e2e-'))
+    const file = path.join(dir, 'not', 'there.txt')
+    try {
+      const flow = await makeFlow(request, [trigger(), card('rf', 'file.read', { path: file }, 280, 0, 'Read')], [edge('t', 'rf')])
+      const first = await runAndWait(request, flow.id)
+      expect(first.status, first.error).toBe('succeeded') // no "File not found" error any more
+      expect(outputOf(first, 'rf')).toEqual({ path: file, text: '', size: 0, exists: false })
+      expect(fs.existsSync(path.join(dir, 'not'))).toBe(false) // and nothing was created
+
+      await open(page, flow.id)
+      await node(page, 'rf').click()
+      const toggle = page.getByTestId('param-input-createIfMissing')
+      await expect(toggle).toHaveAttribute('aria-checked', 'false')
+      await expect(toggle).toContainText('Off')
+      await toggle.click()
+      await expect(toggle).toHaveAttribute('aria-checked', 'true')
+      await page.getByTestId('edit-save').click()
+      await expect(page.getByTestId('edit-saved')).toBeVisible()
+
+      const second = await runAndWait(request, flow.id)
+      expect(second.status, second.error).toBe('succeeded')
+      expect(outputOf(second, 'rf')).toMatchObject({ text: '', exists: false })
+      expect(fs.readFileSync(file, 'utf8')).toBe('') // the empty file (and its folders) now exist
+
+      fs.writeFileSync(file, 'kept')
+      const third = await runAndWait(request, flow.id)
+      expect(outputOf(third, 'rf')).toMatchObject({ text: 'kept', exists: true })
+      expect(fs.readFileSync(file, 'utf8')).toBe('kept') // an existing file is never touched
+    } finally {
+      fs.rmSync(dir, { recursive: true, force: true })
+    }
+  })
+
   test('two branches merged, then stringified as JSON', async ({ request }) => {
     const flow = await makeFlow(
       request,

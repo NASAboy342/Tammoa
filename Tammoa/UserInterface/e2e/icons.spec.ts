@@ -241,6 +241,23 @@ test('a loop: loop-back line, the loop limit field, the round picker and the res
   void runAndWait
 })
 
+test('several cards selected, a group selected (name field, ungroup) and the delete warning: every clickable has an icon', async ({ page, request }) => {
+  const flow = await makeFlow(request, [trigger(), script('a', 'echo a', 260), script('b', 'echo b', 520)], [edge('t', 'a'), edge('a', 'b')], { groups: [{ id: 'g1', name: 'Pair', nodeIds: ['a', 'b'] }] })
+  await page.goto(`/#/flows/${flow.id}`)
+  await expect(node(page, 'a')).toBeVisible()
+  await node(page, 't').click()
+  await node(page, 'a').click({ modifiers: ['Shift'] })
+  await expect(page.getByTestId('selection-bar')).toBeVisible()
+  expect(await withoutIcon(page), 'selection bar for several cards (group, copy, delete) and the group frame').toEqual([])
+  await page.getByTestId('group-head-g1').click()
+  await expect(page.getByTestId('group-name')).toBeVisible()
+  expect(await withoutIcon(page), 'selection bar for a group (ungroup, copy, delete)').toEqual([])
+  expect(await page.getByTestId('group-name').locator('xpath=..').locator('svg[data-icon]').count(), 'group name leading icon').toBeGreaterThanOrEqual(1)
+  await page.getByTestId('sel-delete').click()
+  await expect(page.getByTestId('confirm-dialog')).toBeVisible()
+  expect(await withoutIcon(page), 'delete warning dialog').toEqual([])
+})
+
 test('connections page and its dialogs: every clickable has an icon, every field a leading icon', async ({ page, request }) => {
   const c = await (await request.post('/api/connections', { data: { name: `Audit ${Date.now()}`, provider: 'ollama', baseUrl: 'http://127.0.0.1:1', apiKey: 'k' } })).json()
   await page.goto('/#/connections')

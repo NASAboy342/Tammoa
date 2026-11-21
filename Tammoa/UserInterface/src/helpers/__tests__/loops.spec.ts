@@ -5,7 +5,7 @@ import { findLoops, loopHasCondition } from '../loops'
 
 const node = (id: string, type = 'act'): DraftNode => ({ id, type, name: id, position: { x: 0, y: 0 }, params: {} })
 const edge = (id: string, source: string, target: string, sourceHandle = 'main'): DraftEdge => ({ id, source, target, sourceHandle })
-const draft = (ids: string[], ...edges: [string, string][]): Draft => ({ nodes: ids.map((i) => node(i)), edges: edges.map(([s, t], i) => edge(`e${i}`, s, t)) })
+const draft = (ids: string[], ...edges: [string, string][]): Draft => ({ nodes: ids.map((i) => node(i)), edges: edges.map(([s, t], i) => edge(`e${i}`, s, t)), groups: [] })
 
 describe('findLoops (the same classification the backend engine uses)', () => {
   it('a plain flow and a diamond have no loops', () => {
@@ -36,7 +36,7 @@ describe('findLoops (the same classification the backend engine uses)', () => {
   })
 
   it('two connections between the same pair (e.g. an IF true and false) are both loop-backs', () => {
-    const d: Draft = { nodes: ['t', 'a', 'i'].map((i) => node(i)), edges: [edge('1', 't', 'a'), edge('2', 'a', 'i'), edge('3', 'i', 'a', 'true'), edge('4', 'i', 'a', 'false')] }
+    const d: Draft = { nodes: ['t', 'a', 'i'].map((i) => node(i)), edges: [edge('1', 't', 'a'), edge('2', 'a', 'i'), edge('3', 'i', 'a', 'true'), edge('4', 'i', 'a', 'false')], groups: [] }
     expect([...findLoops(d).backEdgeIds].sort()).toEqual(['3', '4'])
   })
 
@@ -56,8 +56,8 @@ describe('loopHasCondition', () => {
   const types = { if: iff, act }
 
   it('a loop with an IF has a condition; one without does not', () => {
-    const withIf: Draft = { nodes: [node('a'), node('i', 'if')], edges: [] }
-    const without: Draft = { nodes: [node('a'), node('b')], edges: [] }
+    const withIf: Draft = { nodes: [node('a'), node('i', 'if')], edges: [], groups: [] }
+    const without: Draft = { nodes: [node('a'), node('b')], edges: [], groups: [] }
     expect(loopHasCondition(['a', 'i'], withIf, types)).toBe(true)
     expect(loopHasCondition(['a', 'b'], without, types)).toBe(false)
   })

@@ -13,11 +13,12 @@ const e = (id: string, source: string, target: string, sourceHandle = 'main') =>
 const draft = (): Draft => ({
   nodes: [node('t', 'trigger.manual'), node('a'), node('b')],
   edges: [e('e1', 't', 'a'), e('e2', 'a', 'b')],
+  groups: [],
 })
 
 describe('toDraft / toDefinition', () => {
   it('reads tolerant input: missing arrays, names and positions', () => {
-    expect(toDraft(undefined)).toEqual({ nodes: [], edges: [] })
+    expect(toDraft(undefined)).toEqual({ nodes: [], edges: [], groups: [] })
     const d = toDraft({ nodes: [{ id: 'x', type: 'script.shell' }], edges: [{ source: 'x', target: 'y' }] })
     expect(d.nodes[0]).toMatchObject({ id: 'x', name: 'script.shell', position: { x: 0, y: 0 }, params: {} })
     expect(d.edges[0].id).toMatch(/^e-/)
@@ -83,7 +84,7 @@ describe('canConnect', () => {
 describe('graph helpers', () => {
   it('hasTrigger', () => {
     expect(hasTrigger(draft(), types)).toBe(true)
-    expect(hasTrigger({ nodes: [node('a')], edges: [] }, types)).toBe(false)
+    expect(hasTrigger({ nodes: [node('a')], edges: [], groups: [] }, types)).toBe(false)
   })
 })
 
@@ -109,9 +110,9 @@ describe('card size and the loop limit are kept in the definition', () => {
 
   it('keeps other settings the UI does not know, and removes the loop limit when it is cleared', () => {
     const base = { settings: { loopLimit: 9, future: true }, nodes: [], edges: [] }
-    const cleared = toDefinition(base, { nodes: [], edges: [] })
+    const cleared = toDefinition(base, { nodes: [], edges: [], groups: [] })
     expect(cleared.settings).toEqual({ future: true })
-    expect(toDefinition(base, { nodes: [], edges: [], loopLimit: 20 }).settings).toEqual({ future: true, loopLimit: 20 })
+    expect(toDefinition(base, { nodes: [], edges: [], groups: [], loopLimit: 20 }).settings).toEqual({ future: true, loopLimit: 20 })
   })
 
   it('removing a card or a connection keeps the loop limit', () => {
@@ -145,10 +146,10 @@ describe('freeSpot', () => {
 describe('output handles', () => {
   const iff: CardTypeInfo = { ...info('logic.if'), name: 'IF', category: 'logic', outputs: [{ key: 'true', label: 'true' }, { key: 'false', label: 'false' }] }
   const typesWithIf = { ...types, 'logic.if': iff }
-  const d = (): Draft => ({ nodes: [node('t', 'trigger.manual'), node('i', 'logic.if'), node('a'), node('b')], edges: [e('e1', 't', 'i')] })
+  const d = (): Draft => ({ nodes: [node('t', 'trigger.manual'), node('i', 'logic.if'), node('a'), node('b')], edges: [e('e1', 't', 'i')], groups: [] })
 
   it('reads and keeps the handle a connection leaves from', () => {
-    const back = toDraft(toDefinition(undefined, { nodes: [node('i', 'logic.if'), node('a')], edges: [e('x', 'i', 'a', 'false')] }))
+    const back = toDraft(toDefinition(undefined, { nodes: [node('i', 'logic.if'), node('a')], edges: [e('x', 'i', 'a', 'false')], groups: [] }))
     expect(back.edges[0].sourceHandle).toBe('false')
   })
 

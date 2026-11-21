@@ -4,7 +4,8 @@ import { RouterLink, useRoute, useRouter } from 'vue-router'
 import AppIcon from '@/components/icons/AppIcon.vue'
 import FlowSwitch from '@/components/FlowSwitch.vue'
 import DeleteFlowDialog from '@/components/DeleteFlowDialog.vue'
-import FlowCanvas, { type Selection } from '@/components/canvas/FlowCanvas.vue'
+import ConfirmDialog from '@/components/ConfirmDialog.vue'
+import FlowCanvas, { type Move, type Selection } from '@/components/canvas/FlowCanvas.vue'
 import CardPalette from '@/components/canvas/CardPalette.vue'
 import CardInspector, { type InspectorTab } from '@/components/canvas/CardInspector.vue'
 import RunPanel from '@/components/canvas/RunPanel.vue'
@@ -13,7 +14,9 @@ import type { GuideExample } from '@/services/cardApi'
 import type { NodeRunStatus } from '@/services/runApi'
 import { useCardTypeStore } from '@/stores/cardTypeStore'
 import { useRunStore } from '@/stores/runStore'
-import { canConnect, freeSpot, hasTrigger, makeNode, newId, removeEdge, removeNode, toDefinition, toDraft, type Draft } from '@/helpers/flowDraft'
+import { canConnect, freeSpot, hasTrigger, makeNode, newId, removeEdge, removeNodes, toDefinition, toDraft, type Draft } from '@/helpers/flowDraft'
+import { connectionsTouching, copyCards, copyGroup, groupBox, groupNodes, renameGroup, removeGroupWithCards, ungroup } from '@/helpers/groups'
+import { sizeOf } from '@/helpers/cardSize'
 import { parseRunInput, pickNodeRun } from '@/helpers/runHelpers'
 import { findLoops, loopHasCondition } from '@/helpers/loops'
 import { SIDE_DEFAULT, SIDE_MAX, SIDE_MIN, clampSideWidth, widthAfterDrag } from '@/helpers/layout'
@@ -27,9 +30,11 @@ const runs = useRunStore()
 const flow = ref<Flow | null>(null)
 const name = ref('')
 const description = ref('')
-const draft = reactive<Draft>({ nodes: [], edges: [] })
+const draft = reactive<Draft>({ nodes: [], edges: [], groups: [] })
 const savedSnapshot = ref('')
 const selection = ref<Selection | null>(null)
+const selectedIds = ref<string[]>([]) // every selected card: one, several (Shift-click, rectangle) or the cards of the selected group
+const pendingDelete = ref<{ ids: string[]; groupId?: string; title: string; message: string } | null>(null)
 const canvas = ref<InstanceType<typeof FlowCanvas> | null>(null)
 
 const loading = ref(true)
@@ -125,6 +130,15 @@ const loopLimit = computed({
   },
 })
 
+const sizeInView = (n: Draft['nodes'][number]) => sizeOf(n, cards.byType[n.type]?.outputs?.length ?? 1)
+const selectedGroup = computed(() => (selection.value?.kind === 'group' ? draft.groups.find((g) => g.id === selection.value!.id) ?? null : null))
+const hasSelection = computed(() => selectedIds.value.length > 0)
+const selectionLabel = computed(() => {
+  const n = selectedIds.value.length
+  const cardsText = `${n} card${n === 1 ? '' : 's'}`
+  return selectedGroup.value ? `Group · ${cardsText}` : cardsText
+})
+
 const selectedNode = computed(() => (selection.value?.kind === 'node' ? draft.nodes.find((n) => n.id === selection.value!.id) ?? null : null))
 const selectedNodeRun = computed(() => activeRun.value?.nodes.find((n) => n.nodeId === selectedNode.value?.id))
 // the data tabs show the selected run's data for this card, or else the newest run in which it actually ran
@@ -156,9 +170,29 @@ function adopt(f: Flow) {
   const d = toDraft(f.definition)
   draft.nodes = d.nodes
   draft.edges = d.edges
+  draft.groups = d.groups
   draft.loopLimit = d.loopLimit // the flow's loop limit travels with the draft (undefined = the engine's default)
   savedSnapshot.value = snapshot()
-  if (selection.value && !draft.nodes.some((n) => n.id === selection.value!.id) && !draft.edges.some((e) => e.id === selection.value!.id)) selection.value = null
+  if (selection.value && !draft.nodes.some((n) => n.id === selection.value!.id) && !draft.edges.some((e) => e.id === selection.value!.id) && !draft.groups.some((g) => g.id === selection.value!.id)) selection.value = null
+  selectedIds.value = selectedIds.value.filter((i) => draft.nodes.some((n) => n.id === i))
+}
+
+/** The pure helpers return a whole new draft; the view keeps its reactive object and takes the parts over. */
+function apply(next: Draft) {
+  draft.nodes = next.nodes
+  draft.edges = next.edges
+  draft.groups = next.groups
+}
+
+function select(sel: Selection | null) {
+  selection.value = sel
+  if (sel?.kind === 'node') selectedIds.value = [sel.id]
+  else if (sel?.kind === 'group') selectedIds.value = draft.groups.find((g) => g.id === sel.id)?.nodeIds ?? []
+  else selectedIds.value = []
+}
+function selectMany(ids: string[]) {
+  selectedIds.value = ids
+  selection.value = ids.length === 1 ? { kind: 'node', id: ids[0] } : null
 }
 
 function say(text: string) {
@@ -190,7 +224,7 @@ function addCard(type: string) {
   const base = canvas.value?.centerWorld() ?? { x: 0, y: 0 }
   const node = makeNode(info, draft.nodes, freeSpot(draft.nodes, base))
   draft.nodes.push(node)
-  selection.value = { kind: 'node', id: node.id }
+  select({ kind: 'node', id: node.id })
 }
 
 function resizeNode(nodeId: string, w: number, h: number) {
@@ -202,9 +236,49 @@ function fitNode(nodeId: string) {
   if (n) delete n.size // back to "as big as the title needs"
 }
 
-function moveNode(nodeId: string, x: number, y: number) {
-  const n = draft.nodes.find((i) => i.id === nodeId)
-  if (n) n.position = { x, y }
+function moveNodes(moves: Move[]) {
+  for (const m of moves) {
+    const n = draft.nodes.find((i) => i.id === m.id)
+    if (n) n.position = { x: m.x, y: m.y }
+  }
+}
+
+function groupSelection() {
+  const result = groupNodes(draft, selectedIds.value)
+  if (!result.groupId) return say('Select two or more cards to group them.')
+  apply(result.draft)
+  select({ kind: 'group', id: result.groupId })
+  say('Grouped. Name it in the toolbar; click its name bar on the canvas to select the group again.')
+}
+function ungroupSelection() {
+  const g = selectedGroup.value
+  if (!g) return
+  apply(ungroup(draft, g.id))
+  selectMany([...g.nodeIds])
+  say('Ungrouped: the cards stay where they are.')
+}
+function renameSelectedGroup(text: string) {
+  const g = selectedGroup.value
+  if (g && text.trim()) apply(renameGroup(draft, g.id, text))
+}
+/** A group is copied with the connections inside it; cards are copied alone, without any connection. */
+function copySelection() {
+  const g = selectedGroup.value
+  if (g) {
+    const box = groupBox(g, draft.nodes, sizeInView)
+    const inside = draft.edges.filter((e) => g.nodeIds.includes(e.source) && g.nodeIds.includes(e.target)).length
+    const result = copyGroup(draft, g.id, { x: 0, y: (box?.h ?? 120) + 24 })
+    if (!result.groupId) return
+    apply(result.draft)
+    selectedIds.value = result.newIds
+    selection.value = { kind: 'group', id: result.groupId }
+    return say(`Copied the group with its ${inside} connection${inside === 1 ? '' : 's'}.`)
+  }
+  if (!selectedIds.value.length) return
+  const result = copyCards(draft, selectedIds.value)
+  apply(result.draft)
+  selectMany(result.newIds)
+  say(`Copied ${result.newIds.length} card${result.newIds.length === 1 ? '' : 's'}, without connections.`)
 }
 
 function connect(source: string, target: string, handle: string) {
@@ -220,16 +294,38 @@ function connect(source: string, target: string, handle: string) {
         : 'Loop created, but nothing in it decides when to stop: it will repeat until the loop limit. Add an IF card to end it.',
     )
   }
-  selection.value = { kind: 'edge', id: draft.edges[draft.edges.length - 1].id }
+  select({ kind: 'edge', id: draft.edges[draft.edges.length - 1].id })
 }
 
+/** A connection goes at once; a card or a group asks first (it takes its connections with it). */
 function removeSelection() {
   const s = selection.value
-  if (!s) return
-  const next = s.kind === 'node' ? removeNode(draft, s.id) : removeEdge(draft, s.id)
-  draft.nodes = next.nodes
-  draft.edges = next.edges
-  selection.value = null
+  if (s?.kind === 'edge') {
+    draft.edges = removeEdge(draft, s.id).edges
+    return select(null)
+  }
+  const g = selectedGroup.value
+  const ids = g ? [...g.nodeIds] : [...selectedIds.value]
+  if (!ids.length) return
+  const links = connectionsTouching(draft, ids)
+  const linkText = links === 0 ? 'It has no connections.' : `${links} connection${links === 1 ? '' : 's'} go${links === 1 ? 'es' : ''} with ${ids.length === 1 ? 'it' : 'them'}.`
+  const quote = (id: string) => `"${draft.nodes.find((n) => n.id === id)?.name ?? id}"`
+  if (g) {
+    pendingDelete.value = { ids, groupId: g.id, title: 'Delete group', message: `Delete the group "${g.name}" and its ${ids.length} card${ids.length === 1 ? '' : 's'}? ${linkText} To keep the cards, use Ungroup instead.` }
+  } else {
+    pendingDelete.value = {
+      ids,
+      title: ids.length === 1 ? 'Delete card' : 'Delete cards',
+      message: ids.length === 1 ? `Delete the card ${quote(ids[0])}? ${linkText}` : `Delete these ${ids.length} cards? ${linkText}`,
+    }
+  }
+}
+function confirmRemove() {
+  const p = pendingDelete.value
+  pendingDelete.value = null
+  if (!p) return
+  apply(p.groupId ? removeGroupWithCards(draft, p.groupId) : removeNodes(draft, p.ids))
+  select(null)
 }
 
 function setParam(key: string, value: unknown) {
@@ -288,6 +384,7 @@ async function confirmDelete(typed: string) {
   }
 }
 
+const selBtn = 'inline-flex h-9 w-9 items-center justify-center rounded-control border border-line-strong bg-surface hover:bg-surface-hover disabled:opacity-40'
 const inputCls =
   'min-h-9 w-full rounded-control border border-line-strong bg-surface py-1.5 pl-9 pr-3 text-sm outline-none placeholder:text-muted focus:border-ink focus:ring-1 focus:ring-ink aria-[invalid=true]:border-2 aria-[invalid=true]:border-dashed aria-[invalid=true]:border-ink'
 </script>
@@ -337,6 +434,17 @@ const inputCls =
             <input v-model="loopLimit" type="number" min="1" max="1000" aria-label="Loop limit" placeholder="Loop limit (50)" :class="inputCls" data-testid="loop-limit" />
           </span>
           <p v-if="loopsWithoutCondition.length" class="flex min-w-0 items-center gap-1.5 text-xs font-semibold" data-testid="loop-hint"><AppIcon name="alert" :size="13" class="shrink-0" /> A loop has no IF to end it: it repeats until the loop limit.</p>
+          <div v-if="hasSelection" class="flex items-center gap-1.5" data-testid="selection-bar">
+            <span class="flex items-center gap-1 text-xs font-semibold text-ink-soft" data-testid="selection-count"><AppIcon name="layers" :size="13" /> {{ selectionLabel }}</span>
+            <span v-if="selectedGroup" class="relative block w-44">
+              <AppIcon name="edit" :size="14" class="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-muted" />
+              <input type="text" maxlength="60" aria-label="Group name" placeholder="Group name" :value="selectedGroup.name" :class="inputCls" data-testid="group-name" autocomplete="off" @input="renameSelectedGroup(($event.target as HTMLInputElement).value)" @blur="($event.target as HTMLInputElement).value = selectedGroup.name" />
+            </span>
+            <button v-if="!selectedGroup" type="button" :disabled="selectedIds.length < 2" :class="selBtn" title="Group the selected cards" aria-label="Group the selected cards" data-testid="sel-group" @click="groupSelection"><AppIcon name="layers" :size="15" /></button>
+            <button v-else type="button" :class="selBtn" title="Ungroup (the cards stay)" aria-label="Ungroup" data-testid="sel-ungroup" @click="ungroupSelection"><AppIcon name="ungroup" :size="15" /></button>
+            <button type="button" :class="selBtn" :title="selectedGroup ? 'Copy the group with the connections inside it' : 'Copy the selected cards (connections are not copied)'" aria-label="Copy" data-testid="sel-copy" @click="copySelection"><AppIcon name="copy" :size="15" /></button>
+            <button type="button" :class="[selBtn, 'border-ink']" :title="selectedGroup ? 'Delete the group and its cards' : 'Delete the selected cards'" aria-label="Delete" data-testid="sel-delete" @click="removeSelection"><AppIcon name="trash" :size="15" /></button>
+          </div>
           <span class="flex-1" />
           <span class="relative block w-56">
             <AppIcon name="zap" :size="15" class="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-muted" />
@@ -358,15 +466,19 @@ const inputCls =
             ref="canvas"
             :nodes="draft.nodes"
             :edges="draft.edges"
+            :groups="draft.groups"
+            :selected-ids="selectedIds"
             :types="cards.byType"
             :icon-for="cards.iconFor"
             :states="nodeStates"
             :selection="selection"
             :rounds="rounds"
-            @move="moveNode"
+            @move="moveNodes"
             @resize="resizeNode"
             @fit="fitNode"
-            @select="selection = $event"
+            @select="select"
+            @select-many="selectMany"
+            @copy="copySelection"
             @connect="connect"
             @remove="removeSelection"
           />
@@ -430,6 +542,7 @@ const inputCls =
       </div>
     </template>
 
+    <ConfirmDialog v-if="pendingDelete" :title="pendingDelete.title" :message="pendingDelete.message" confirm-label="Delete" confirm-icon="trash" danger @confirm="confirmRemove" @cancel="pendingDelete = null" />
     <DeleteFlowDialog v-if="confirmingDelete && flow" :flow-name="flow.name" :busy="deleteBusy" :error="deleteError" @confirm="confirmDelete" @cancel="confirmingDelete = false" />
   </section>
 </template>

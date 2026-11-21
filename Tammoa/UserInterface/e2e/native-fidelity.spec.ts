@@ -175,6 +175,34 @@ test('cards grow to hold their title, resize by hand, and a loop-back is drawn d
   await page.screenshot({ path: 'test-results/webkit-loop.png' })
 })
 
+test('selecting several cards, moving them together, grouping, copying and the delete warning work in WebKit', async ({ page, request }) => {
+  const flow = await makeFlow(request, [trigger(), card('a', 'script.shell', { command: 'echo a' }, 260, 0, 'A'), card('b', 'script.shell', { command: 'echo b' }, 520, 0, 'B'), card('c', 'script.shell', { command: 'echo c' }, 260, 160, 'C')], [edge('t', 'a'), edge('a', 'b')])
+  await open(page, flow.id)
+  const x = async (id: string) => (await node(page, id).boundingBox())!.x
+  const ax = await x('a')
+  await node(page, 'a').click()
+  await node(page, 'b').click({ modifiers: ['Shift'] })
+  await expect(page.getByTestId('selection-count')).toContainText('2 cards')
+  const a = (await node(page, 'a').boundingBox())!
+  await page.mouse.move(a.x + a.width / 2, a.y + a.height / 2)
+  await page.mouse.down()
+  await page.mouse.move(a.x + a.width / 2 + 60, a.y + a.height / 2 + 20, { steps: 8 })
+  await page.mouse.up()
+  expect(await x('a')).toBeGreaterThan(ax + 40)
+  await page.getByTestId('sel-group').click()
+  await expect(page.locator('[data-group-name]')).toHaveCount(1)
+  await page.getByTestId('group-name').fill('Pair')
+  await expect(page.getByTestId('group-title')).toHaveText('Pair')
+  await page.getByTestId('sel-copy').click()
+  await expect(page.locator('[data-group-name]')).toHaveCount(2)
+  await expect(page.locator('[data-node-card]')).toHaveCount(6)
+  await page.getByTestId('sel-delete').click()
+  await expect(page.getByTestId('confirm-dialog')).toBeVisible()
+  await page.screenshot({ path: 'test-results/webkit-groups.png' })
+  await page.getByTestId('confirm-ok').click()
+  await expect(page.locator('[data-node-card]')).toHaveCount(4)
+})
+
 test('live run state arrives over server-sent events in WebKit', async ({ page, request }) => {
   const flow = await makeFlow(request, [trigger(), card('s', 'script.shell', { command: 'echo webkit' })], [edge('t', 's')])
   await open(page, flow.id)

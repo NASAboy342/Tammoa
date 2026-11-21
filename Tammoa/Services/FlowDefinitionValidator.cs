@@ -9,6 +9,7 @@ public class FlowDefinitionValidator : IFlowDefinitionValidator
     public const int MaxNameLength = 100;
     public const int MinLoopLimit = 1;
     public const int MaxLoopLimit = 1000;
+    public const int MaxGroupNameLength = 60;
     public const int MinCardSize = 40;
     public const int MaxCardSize = 1600;
 
@@ -88,12 +89,39 @@ public class FlowDefinitionValidator : IFlowDefinitionValidator
 
         // A connection may go back to an earlier card: that is a loop (see LoopAnalysis). The engine ends a loop that never ends
         // with the loop limit, so there is nothing more to check here.
+        ValidateGroups(definition["groups"], ids);
+
         if (definition["settings"] is { Type: not JTokenType.Null } settings)
         {
             if (settings is not JObject so) throw new ArgumentException("definition.settings must be an object.");
             if (so["loopLimit"] is { Type: not JTokenType.Null } limit &&
                 !(limit.Type == JTokenType.Integer && (long)limit is >= MinLoopLimit and <= MaxLoopLimit))
                 throw new ArgumentException($"The loop limit must be a whole number from {MinLoopLimit} to {MaxLoopLimit}.");
+        }
+    }
+    /// <summary>Groups only organise the canvas (the engine ignores them): a name, and the cards inside. A card is in at most one group.</summary>
+    private static void ValidateGroups(JToken? token, HashSet<string> cardIds)
+    {
+        if (token is null || token.Type == JTokenType.Null) return;
+        if (token is not JArray groups) throw new ArgumentException("definition.groups must be an array.");
+        if (groups.Count > MaxNodes) throw new ArgumentException($"A flow is limited to {MaxNodes} groups.");
+        var groupIds = new HashSet<string>();
+        var grouped = new HashSet<string>();
+        foreach (var g in groups)
+        {
+            if (g is not JObject group) throw new ArgumentException("Every group must be an object.");
+            var id = group["id"]?.Type == JTokenType.String ? (string)group["id"]! : "";
+            if (id.Length == 0 || id.Length > MaxIdLength) throw new ArgumentException($"Every group needs an id of 1 to {MaxIdLength} characters.");
+            if (!groupIds.Add(id)) throw new ArgumentException($"Duplicate group id '{id}'.");
+            var name = group["name"]?.Type == JTokenType.String ? ((string)group["name"]!).Trim() : "";
+            if (name.Length == 0 || name.Length > MaxGroupNameLength) throw new ArgumentException($"A group name must be text of 1 to {MaxGroupNameLength} characters.");
+            if (group["nodeIds"] is not JArray members) throw new ArgumentException($"Group '{name}': nodeIds must be an array of card ids.");
+            foreach (var m in members)
+            {
+                var cardId = m.Type == JTokenType.String ? (string)m! : "";
+                if (!cardIds.Contains(cardId)) throw new ArgumentException($"Group '{name}' holds a card that does not exist.");
+                if (!grouped.Add(cardId)) throw new ArgumentException("A card can be in only one group.");
+            }
         }
     }
 }

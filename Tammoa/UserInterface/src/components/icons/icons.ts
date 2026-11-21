@@ -131,6 +131,7 @@ export const ICONS = {
   search: [circle(11, 11, 8), line(21, 21, 16.65, 16.65)],
   'chevron-up': [poly('18 15 12 9 6 15')],
   eraser: [path('m7 21-4.3-4.3c-1-1-1-2.5 0-3.4l9.6-9.6c1-1 2.5-1 3.4 0l5.6 5.6c1 1 1 2.5 0 3.4L13 21'), path('M22 21H7'), path('m5 11 9 9')],
+  ungroup: [rect(3, 3, 8, 8, 1), rect(13, 13, 8, 8, 1), path('M17 3h1a3 3 0 0 1 3 3v1'), path('M7 21H6a3 3 0 0 1-3-3v-1')],
   resize: [line(21, 15, 15, 21), line(21, 9, 9, 21)],
   flag: [path('M4 15s1-1 4-1 5 2 8 2 4-1 4-1V3s-1 1-4 1-5-2-8-2-4 1-4 1z'), line(4, 22, 4, 15)],
 } satisfies Record<string, IconShape[]>

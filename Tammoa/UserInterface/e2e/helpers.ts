@@ -12,9 +12,9 @@ export const card = (id: string, type: string, params: Record<string, unknown> =
 export const edge = (source: string, target: string, sourceHandle = 'main'): E => ({ id: `e-${source}-${sourceHandle}-${target}`, source, sourceHandle, target })
 
 /** Creates a flow through the API with the given cards (seeding only; the behaviour under test is driven through the UI). */
-export async function makeFlow(request: APIRequestContext, nodes: N[], edges: E[] = []) {
+export async function makeFlow(request: APIRequestContext, nodes: N[], edges: E[] = [], extra: Record<string, unknown> = {}) {
   const flow = await (await request.post('/api/flows', { data: { name: unique('Canvas'), description: '' } })).json()
-  const res = await request.put(`/api/flows/${flow.id}`, { data: { name: flow.name, description: '', definition: { schemaVersion: 1, nodes, edges } } })
+  const res = await request.put(`/api/flows/${flow.id}`, { data: { name: flow.name, description: '', definition: { schemaVersion: 1, nodes, edges, ...extra } } })
   expect(res.status(), await res.text()).toBe(200)
   return flow as { id: string; name: string }
 }

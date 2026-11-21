@@ -2,7 +2,9 @@
 /**
  * The card canvas: pan (drag the background or scroll), zoom (Ctrl/Cmd + scroll or the buttons), drag cards,
  * connect by dragging from a card's output handle onto another card (also back onto an EARLIER card: that makes a loop, drawn dashed
- * under the cards), resize a card by its bottom-right corner, click to select, Delete removes the selection.
+ * under the cards), resize a card by its bottom-right corner, click to select (Shift/Ctrl/Cmd-click adds or removes a card, Shift-drag on the
+ * background draws a selection rectangle, Ctrl/Cmd+A selects all), drag a selected card to move every selected card, click a group's header to
+ * select the group. Delete asks to remove the selection (the page shows the warning), Ctrl/Cmd+D copies it.
  * A card is as big as its title needs unless the user dragged it to a size.
  * Presentational: cards, connections and run states come in as props; every change goes out as an event.
  * It never executes anything: states are whatever the backend reported.
@@ -12,17 +14,26 @@ import AppIcon from '@/components/icons/AppIcon.vue'
 import type { IconName } from '@/components/icons/icons'
 import type { CardTypeInfo } from '@/services/cardApi'
 import type { NodeRunStatus } from '@/services/runApi'
-import type { DraftEdge, DraftNode } from '@/helpers/flowDraft'
+import type { DraftEdge, DraftGroup, DraftNode } from '@/helpers/flowDraft'
 import { NODE_H, NODE_W, edgePath, inputPort, loopEdgePath, outputPort, screenToWorld, zoomAt, type Point, type Size, type View } from '@/helpers/canvasMath'
 import { MAX_MANUAL, MIN_MANUAL, sizeOf, titleLines } from '@/helpers/cardSize'
 import { findLoops } from '@/helpers/loops'
+import { groupBox, nodesInRect, type Box } from '@/helpers/groups'
 import { nodeStatusIcon, statusLabel } from '@/helpers/runHelpers'
 
-export type Selection = { kind: 'node' | 'edge'; id: string }
+export type Selection = { kind: 'node' | 'edge' | 'group'; id: string }
+export interface Move {
+  id: string
+  x: number
+  y: number
+}
 
 const props = defineProps<{
   nodes: DraftNode[]
   edges: DraftEdge[]
+  groups: DraftGroup[]
+  /** Every selected card (one, several, or the cards of the selected group). */
+  selectedIds: string[]
   types: Record<string, CardTypeInfo>
   iconFor: (type: string) => IconName
   states: Record<string, NodeRunStatus>
@@ -31,8 +42,10 @@ const props = defineProps<{
   selection: Selection | null
 }>()
 const emit = defineEmits<{
-  move: [id: string, x: number, y: number]
+  move: [moves: Move[]]
   select: [selection: Selection | null]
+  selectMany: [ids: string[]]
+  copy: []
   connect: [source: string, target: string, handle: string]
   resize: [id: string, w: number, h: number]
   fit: [id: string]
@@ -52,6 +65,16 @@ const portOf = (node: DraftNode, handle: string) => {
   const outs = outputsOf(node)
   return outputPort(node.position, Math.max(0, outs.findIndex((o) => o.key === handle)), outs.length, sizeFor(node))
 }
+
+const selectedSet = computed(() => new Set(props.selectedIds))
+/** A frame around each group's cards (it follows them when they move or change size). */
+const frames = computed(() =>
+  props.groups.flatMap((g) => {
+    const box = groupBox(g, props.nodes, sizeFor)
+    return box ? [{ group: g, box }] : []
+  }),
+)
+const marquee = ref<Box | null>(null)
 
 const loops = computed(() => findLoops({ nodes: props.nodes, edges: props.edges }))
 interface DrawnEdge {
@@ -107,6 +130,7 @@ function gesture(move: (e: PointerEvent) => void, end: (e: PointerEvent) => void
 
 function onBackgroundDown(e: PointerEvent) {
   el.value?.focus()
+  if (e.shiftKey) return onMarqueeDown(e)
   emit('select', null)
   const start = { x: e.clientX, y: e.clientY, vx: view.x, vy: view.y }
   gesture(
@@ -118,14 +142,61 @@ function onBackgroundDown(e: PointerEvent) {
   )
 }
 
+/** Shift + drag on the background: a rectangle that selects every card it touches. */
+function onMarqueeDown(e: PointerEvent) {
+  const from = worldAt(e)
+  marquee.value = { x: from.x, y: from.y, w: 0, h: 0 }
+  gesture(
+    (m) => {
+      const to = worldAt(m)
+      const box = { x: Math.min(from.x, to.x), y: Math.min(from.y, to.y), w: Math.abs(to.x - from.x), h: Math.abs(to.y - from.y) }
+      marquee.value = box
+      emit('selectMany', nodesInRect(props.nodes, box, sizeFor))
+    },
+    () => {
+      marquee.value = null
+    },
+  )
+}
+
+/** Drags these cards together: each keeps its place relative to the others. */
+function dragCards(e: PointerEvent, ids: string[], onClick?: () => void) {
+  const starts = props.nodes.filter((n) => ids.includes(n.id)).map((n) => ({ id: n.id, x: n.position.x, y: n.position.y }))
+  let moved = false
+  gesture(
+    (m) => {
+      const dx = (m.clientX - e.clientX) / view.k
+      const dy = (m.clientY - e.clientY) / view.k
+      if (!moved && Math.hypot(m.clientX - e.clientX, m.clientY - e.clientY) < 3) return
+      moved = true
+      emit('move', starts.map((s) => ({ id: s.id, x: Math.round(s.x + dx), y: Math.round(s.y + dy) })))
+    },
+    () => {
+      if (!moved) onClick?.()
+    },
+  )
+}
+
 function onNodeDown(e: PointerEvent, node: DraftNode) {
   el.value?.focus()
+  if (e.shiftKey || e.ctrlKey || e.metaKey) {
+    // add the card to the selection, or take it out
+    emit('selectMany', selectedSet.value.has(node.id) ? props.selectedIds.filter((i) => i !== node.id) : [...props.selectedIds, node.id])
+    return
+  }
+  if (selectedSet.value.has(node.id) && props.selectedIds.length > 1) {
+    // part of a multi-selection: the whole selection moves; a plain click (no movement) selects just this card
+    return dragCards(e, props.selectedIds, () => emit('select', { kind: 'node', id: node.id }))
+  }
   emit('select', { kind: 'node', id: node.id })
-  const start = { x: e.clientX, y: e.clientY, nx: node.position.x, ny: node.position.y }
-  gesture(
-    (m) => emit('move', node.id, Math.round(start.nx + (m.clientX - start.x) / view.k), Math.round(start.ny + (m.clientY - start.y) / view.k)),
-    () => {},
-  )
+  dragCards(e, [node.id])
+}
+
+/** Click a group's name bar to select the group; drag it to move the group's cards together. */
+function onGroupDown(e: PointerEvent, group: DraftGroup) {
+  el.value?.focus()
+  emit('select', { kind: 'group', id: group.id })
+  dragCards(e, group.nodeIds)
 }
 
 function onOutputDown(e: PointerEvent, node: DraftNode, handle: string) {
@@ -175,7 +246,17 @@ function zoomBy(factor: number) {
 }
 
 function onKey(e: KeyboardEvent) {
-  if ((e.key === 'Delete' || e.key === 'Backspace') && props.selection && e.target === el.value) {
+  if (e.target === el.value && (e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'a') {
+    e.preventDefault()
+    emit('selectMany', props.nodes.map((n) => n.id))
+    return
+  }
+  if (e.target === el.value && (e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'd') {
+    e.preventDefault()
+    emit('copy')
+    return
+  }
+  if ((e.key === 'Delete' || e.key === 'Backspace') && (props.selection || props.selectedIds.length > 0) && e.target === el.value) {
     e.preventDefault()
     emit('remove')
   }
@@ -195,7 +276,7 @@ const toolBtn = 'inline-flex h-8 w-8 items-center justify-center rounded-control
 function nodeClass(node: DraftNode) {
   const st = props.states[node.id]
   return [
-    props.selection?.kind === 'node' && props.selection.id === node.id ? 'border-2 border-ink' : 'border border-line-strong',
+    selectedSet.value.has(node.id) ? 'border-2 border-ink' : 'border border-line-strong',
     st === 'running' ? 'border-dashed' : '',
     st === 'failed' ? 'border-2 border-ink' : '',
     st === 'skipped' || st === 'cancelled' ? 'opacity-55' : '',
@@ -214,6 +295,33 @@ function nodeClass(node: DraftNode) {
     @keydown="onKey"
   >
     <div class="pointer-events-none absolute left-0 top-0 origin-top-left" data-testid="canvas-layer" :style="{ transform: `translate(${view.x}px, ${view.y}px) scale(${view.k})` }">
+      <div
+        v-for="f in frames"
+        :key="f.group.id"
+        class="pointer-events-none absolute rounded-card"
+        :class="selection?.kind === 'group' && selection.id === f.group.id ? 'border-2 border-ink' : 'border border-dashed border-line-strong'"
+        :style="{ left: `${f.box.x}px`, top: `${f.box.y}px`, width: `${f.box.w}px`, height: `${f.box.h}px` }"
+        :data-testid="`group-${f.group.id}`"
+        :data-group-name="f.group.name"
+      >
+        <div
+          class="pointer-events-auto flex h-[26px] max-w-full cursor-grab items-center gap-1.5 truncate px-2.5 text-[11px] font-semibold text-ink-soft active:cursor-grabbing"
+          :title="`Group: ${f.group.name} (click to select, drag to move)`"
+          :data-testid="`group-head-${f.group.id}`"
+          @pointerdown.stop="onGroupDown($event, f.group)"
+        >
+          <AppIcon name="layers" :size="12" class="shrink-0" />
+          <span class="truncate" data-testid="group-title">{{ f.group.name }}</span>
+        </div>
+      </div>
+
+      <div
+        v-if="marquee"
+        class="pointer-events-none absolute border border-dashed border-ink bg-ink/5"
+        :style="{ left: `${marquee.x}px`, top: `${marquee.y}px`, width: `${marquee.w}px`, height: `${marquee.h}px` }"
+        data-testid="marquee"
+      />
+
       <svg class="absolute left-0 top-0 overflow-visible" width="1" height="1" data-testid="canvas-edges">
         <g v-for="p in paths" :key="p.id" :data-testid="`edge-${p.id}`" :data-loop="p.loop ? 'true' : undefined">
           <path :d="p.d" fill="none" stroke="var(--ink)" :stroke-width="selection?.kind === 'edge' && selection.id === p.id ? 3 : 1.5" :stroke-dasharray="p.loop ? '7 5' : undefined" stroke-linecap="round" />

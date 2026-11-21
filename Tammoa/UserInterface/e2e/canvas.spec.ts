@@ -67,6 +67,8 @@ test.describe('building a flow on the canvas', () => {
     await node(page, 'a').click()
     await page.getByTestId('canvas').focus()
     await page.keyboard.press('Delete')
+    await expect(page.getByTestId('confirm-dialog')).toBeVisible() // a card is never deleted without asking
+    await page.getByTestId('confirm-ok').click()
     await expect(node(page, 'a')).toHaveCount(0)
     await expect(page.locator('[data-testid^="edge-e-"]')).toHaveCount(0) // its connection went with it
     await expect(page.getByTestId('edit-save')).toBeEnabled()

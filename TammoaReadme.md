@@ -54,6 +54,12 @@ Open **Connections**, add your Ollama address (default `http://localhost:11434`;
 - Cards that ran more than once show `×N`; in the side panel use the round arrows to read what each earlier round got and produced (last 10 kept).
 - **Card size:** cards grow to show their whole title. Drag the small handle at a card's bottom-right corner to resize it; double-click the handle to return to automatic.
 
+## Selecting, grouping and copying cards
+- **Select several:** Shift-click cards, or hold Shift and drag a rectangle on the empty canvas (Ctrl/Cmd+A selects all). Drag any selected card to move them all together.
+- **Group:** select two or more cards and press the group button in the toolbar; type a name for the group there. Click the group's name bar to select the group (drag it to move all its cards). *Ungroup* keeps the cards.
+- **Copy:** the copy button (or Ctrl/Cmd+D) duplicates the selected cards **without** their connections. Copying a **group** also copies the connections inside it. A Data card's stored text is not copied.
+- **Delete:** deleting a card, several cards or a group (with its cards) always asks first. Nothing is final until you press Save.
+
 ## Vision (mostly not built yet)
 - **Card canvas** with connections, like n8n; flows saved as JSON.
 - **Trigger cards**: manual click, passed-in prompt/value, schedule.

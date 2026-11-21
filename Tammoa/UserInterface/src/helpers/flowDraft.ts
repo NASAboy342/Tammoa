@@ -19,9 +19,16 @@ export interface DraftEdge {
   sourceHandle: string
   target: string
 }
+/** A named set of cards that is drawn as one frame and moves together. It only organises the canvas; the engine ignores it. */
+export interface DraftGroup {
+  id: string
+  name: string
+  nodeIds: string[]
+}
 export interface Draft {
   nodes: DraftNode[]
   edges: DraftEdge[]
+  groups: DraftGroup[]
   /** How often one card may run in one run (flow setting); undefined = the engine's default (50). */
   loopLimit?: number
 }
@@ -43,14 +50,31 @@ export function toDraft(def: FlowDefinition | undefined): Draft {
       ...(n.size && Number.isFinite(Number(n.size.w)) && Number.isFinite(Number(n.size.h)) ? { size: { w: Number(n.size.w), h: Number(n.size.h) } } : {}),
       params: { ...(n.params ?? {}) },
     })),
+    groups: toGroups(def?.groups, new Set(nodes.map((n) => String(n.id)))),
     ...(typeof def?.settings?.loopLimit === 'number' ? { loopLimit: def.settings.loopLimit } : {}),
     edges: edges.map((e) => ({ id: String(e.id ?? newId('e')), source: String(e.source), sourceHandle: String(e.sourceHandle ?? 'main'), target: String(e.target) })),
   }
 }
 
+/** Groups from a stored definition; anything that points at a missing card, or a card already in a group, is dropped. */
+function toGroups(raw: unknown, cardIds: Set<string>): DraftGroup[] {
+  if (!Array.isArray(raw)) return []
+  const used = new Set<string>()
+  const groups: DraftGroup[] = []
+  for (const g of raw as Partial<DraftGroup>[]) {
+    if (!g || typeof g.id !== 'string' || typeof g.name !== 'string') continue
+    const nodeIds = (Array.isArray(g.nodeIds) ? g.nodeIds : []).map(String).filter((id) => cardIds.has(id) && !used.has(id))
+    nodeIds.forEach((id) => used.add(id))
+    groups.push({ id: g.id, name: g.name, nodeIds })
+  }
+  return groups
+}
+
 /** Writes the draft back over the stored definition, keeping keys the UI doesn't know (schemaVersion, future fields). */
 export function toDefinition(base: FlowDefinition | undefined, draft: Draft): FlowDefinition {
   const definition: FlowDefinition = { ...(base ?? {}), nodes: draft.nodes.map((n) => ({ ...n })), edges: draft.edges.map((e) => ({ ...e })) }
+  if (draft.groups.length > 0) definition.groups = draft.groups.map((g) => ({ ...g, nodeIds: [...g.nodeIds] }))
+  else delete definition.groups
   const settings = { ...((base?.settings as Record<string, unknown> | undefined) ?? {}) }
   if (draft.loopLimit === undefined) delete settings.loopLimit
   else settings.loopLimit = draft.loopLimit
@@ -94,7 +118,18 @@ export function freeSpot(nodes: DraftNode[], start: { x: number; y: number }): {
 }
 
 export function removeNode(draft: Draft, id: string): Draft {
-  return { ...draft, nodes: draft.nodes.filter((n) => n.id !== id), edges: draft.edges.filter((e) => e.source !== id && e.target !== id) }
+  return removeNodes(draft, [id])
+}
+
+/** Removes cards with their connections; they also leave their groups, and a group left without cards disappears. */
+export function removeNodes(draft: Draft, ids: string[]): Draft {
+  const gone = new Set(ids)
+  return {
+    ...draft,
+    nodes: draft.nodes.filter((n) => !gone.has(n.id)),
+    edges: draft.edges.filter((e) => !gone.has(e.source) && !gone.has(e.target)),
+    groups: draft.groups.map((g) => ({ ...g, nodeIds: g.nodeIds.filter((id) => !gone.has(id)) })).filter((g) => g.nodeIds.length > 0),
+  }
 }
 
 export function removeEdge(draft: Draft, id: string): Draft {

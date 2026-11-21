@@ -1,4 +1,5 @@
 import { expect, test, type Page } from '@playwright/test'
+import { openTab, showJson } from './helpers'
 
 /**
  * Icon audit — house rule: every clickable thing has an icon.
@@ -129,11 +130,53 @@ test('code editor, output viewer, run log, IF and AI cards: every clickable has 
   await page.getByTestId('run').click() // the flow is already saved, so Run is available
   await expect(page.locator('[data-testid^="run-row-"][data-status="succeeded"]')).toHaveCount(1) // IF (a = a) → true → the JavaScript card
   await page.getByTestId('node-c').click()
+  await showJson(page, 'output')
   await expect(page.getByTestId('output-copy')).toBeVisible()
   expect(await withoutIcon(page), 'finished run: delete, clear, output copy / full').toEqual([])
   await page.getByTestId('output-expand').click()
   await expect(page.getByTestId('output-dialog')).toBeVisible()
   expect(await withoutIcon(page), 'output in full dialog').toEqual([])
+})
+
+test('input / output tabs, the guide with examples, the code hint: every clickable has an icon', async ({ page, request }) => {
+  const flow = await (await request.post('/api/flows', { data: { name: `Tabs ${Date.now()}`, description: '' } })).json()
+  const many = Object.fromEntries(Array.from({ length: 12 }, (_, i) => [`f${i}`, i]))
+  const nodes = [
+    { id: 't', type: 'trigger.manual', name: 'Start', position: { x: 0, y: 0 }, params: {} },
+    { id: 'a', type: 'script.shell', name: 'Make data', position: { x: 260, y: 0 }, params: { command: `echo '${JSON.stringify({ name: 'Sok', ...many })}'` } },
+    { id: 'b', type: 'script.shell', name: 'Use data', position: { x: 520, y: 0 }, params: { language: 'javascript', command: '' } },
+  ]
+  await request.put(`/api/flows/${flow.id}`, { data: { name: flow.name, description: '', definition: { nodes, edges: [{ id: 'e1', source: 't', target: 'a' }, { id: 'e2', source: 'a', target: 'b' }] } } })
+  await page.goto(`/#/flows/${flow.id}`)
+  await expect(page.getByTestId('node-b')).toBeVisible()
+  await page.getByTestId('run-input').fill('{"city":"Phnom Penh"}')
+  await page.getByTestId('run').click()
+  await expect(page.getByTestId('node-a')).toHaveAttribute('data-status', 'succeeded')
+
+  await page.getByTestId('node-b').click()
+  await expect(page.getByTestId('code-hint')).toBeVisible()
+  expect(await withoutIcon(page), 'Settings tab with the language hint and its Examples button').toEqual([])
+
+  await openTab(page, 'input')
+  await expect(page.getByTestId('fields-filter').first()).toBeVisible() // many fields: the filter shows
+  await expect(page.getByTestId('field-copy').first()).toBeVisible()
+  expect(await withoutIcon(page), 'Input tab: fields with copy buttons, Fields / JSON, Run input').toEqual([])
+  await page.getByTestId('input-data').getByTestId('view-json').click()
+  expect(await withoutIcon(page), 'Input tab in JSON view (output viewer buttons)').toEqual([])
+
+  await openTab(page, 'output')
+  expect(await withoutIcon(page), 'Output tab').toEqual([])
+
+  await openTab(page, 'guide')
+  await expect(page.getByTestId('guide-apply').first()).toBeVisible()
+  await page.getByTestId('guide-basics-toggle').click()
+  await expect(page.getByTestId('guide-basics')).toBeVisible()
+  expect(await withoutIcon(page), 'Guide tab: example (Use this example, Copy), data basics').toEqual([])
+  await page.getByTestId('guide-example-toggle').nth(1).click()
+  expect(await withoutIcon(page), 'Guide tab with two examples open').toEqual([])
+  for (const id of ['inspector-tab-settings', 'inspector-tab-input', 'inspector-tab-output', 'inspector-tab-guide']) {
+    expect(await page.getByTestId(id).locator('svg[data-icon]').count(), id).toBeGreaterThanOrEqual(1) // tabs carry icons too
+  }
 })
 
 test('connections page and its dialogs: every clickable has an icon, every field a leading icon', async ({ page, request }) => {

@@ -21,7 +21,20 @@ public class WriteFileCard : ICardType
             new CardParamInfo("content", "Content", ParamKind.Code, CodeLanguage: "text", Required: true, Placeholder: "{{input.text}}"),
             new CardParamInfo("mode", "If the file exists", ParamKind.Select, DefaultValue: "overwrite", Options: [new("overwrite", "Overwrite"), new("append", "Append")]),
             new CardParamInfo("createDirectories", "Create missing folders", ParamKind.Bool, DefaultValue: true),
-        ]);
+        ])
+    {
+        Guide = new CardGuide(
+            "Saves text to a file on this computer: results, logs, anything the next steps (or you) need.",
+            "Receives the previous card's output as input; use {{input.field}} in Path and Content.",
+            new JObject { ["path"] = "/home/me/out/report.txt", ["bytes"] = 17, ["mode"] = "overwrite" },
+            [
+                new GuideExample("Save a result", "Overwrite a file each run.", new JObject { ["path"] = "~/out/report.txt", ["content"] = "{{input.text}}" }, "{{input.text}}", "text",
+                    new JObject { ["text"] = "All good" }, "Writes \"All good\". Output { path, bytes, mode } (next card: {{input.path}})."),
+                new GuideExample("Keep a log", "Append a line per run.", new JObject { ["path"] = "~/out/log.txt", ["mode"] = "append", ["content"] = "{{input.json.status}}\n" }, "{{input.json.status}}\n", "text",
+                    new JObject { ["json"] = new JObject { ["status"] = "ok" } }, "Adds \"ok\" and a new line to the end of the file."),
+            ],
+            ["Folders are created when missing (switch it off to refuse).", "To save a whole object, add a JSON card in stringify mode first and write {{input.text}}."]),
+    };
 
     public async Task<CardResult> ExecuteAsync(CardExecutionContext context, CancellationToken ct)
     {

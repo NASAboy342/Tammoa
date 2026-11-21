@@ -1,5 +1,5 @@
 import { expect, test } from '@playwright/test'
-import { codeOf, drag, edge, makeFlow, node, nodeCount, open, script, setCode, setv, trigger } from './helpers'
+import { codeOf, drag, edge, makeFlow, node, nodeCount, open, script, setCode, setv, showJson, trigger } from './helpers'
 
 test.describe('building a flow on the canvas', () => {
   test('the palette lists the card types the backend offers', async ({ page, request }) => {
@@ -113,9 +113,11 @@ test.describe('running a flow (all execution happens in the backend)', () => {
     await expect(page.locator('[data-testid^="run-row-"]').first()).toHaveAttribute('data-status', 'succeeded')
 
     await node(page, 'c').click()
-    await expect(page.getByTestId('inspector-result').getByTestId('output-preview')).toContainText("got it's alive") // quoted safely through the shell
+    await showJson(page, 'output')
+    await expect(page.getByTestId('output-preview')).toContainText("got it's alive") // quoted safely through the shell
     await node(page, 's').click()
-    await expect(page.getByTestId('inspector-result').getByTestId('output-preview')).toContainText('"msg": "it\'s alive"')
+    await showJson(page, 'output')
+    await expect(page.getByTestId('output-preview')).toContainText('"msg": "it\'s alive"')
   })
 
   test('state shows up immediately: finished cards turn green while a later card still runs (a stale start response must not overwrite pushed state)', async ({ page, request }) => {

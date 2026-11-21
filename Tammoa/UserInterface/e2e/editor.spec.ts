@@ -1,5 +1,5 @@
 import { expect, test } from '@playwright/test'
-import { card, codeOf, drag, edge, makeFlow, node, open, runAndWait, script, setCode, setv, trigger } from './helpers'
+import { card, codeOf, drag, edge, makeFlow, node, open, runAndWait, script, setCode, setv, showJson, trigger } from './helpers'
 
 const sideWidth = async (page: import('@playwright/test').Page) => Math.round((await page.getByTestId('side-panel').boundingBox())!.width)
 
@@ -94,8 +94,9 @@ test.describe('long text is never silently cut off', () => {
     await page.getByTestId('run').click()
     await expect(node(page, 'big')).toHaveAttribute('data-status', 'succeeded')
     await node(page, 'big').click()
+    await showJson(page, 'output')
 
-    const viewer = page.getByTestId('inspector-result').getByTestId('output-viewer')
+    const viewer = page.getByTestId('output-data').getByTestId('output-viewer')
     await expect(viewer.getByTestId('output-cut')).toContainText('more characters')
     expect(await viewer.getByTestId('output-preview').evaluate((e) => (e as HTMLElement).innerText.length)).toBeLessThan(2000)
     await expect(viewer.getByTestId('output-size')).toContainText(/6,\d{3}|7,\d{3}/)
@@ -120,6 +121,7 @@ test.describe('long text is never silently cut off', () => {
     await page.getByTestId('run').click()
     await expect(node(page, 's')).toHaveAttribute('data-status', 'succeeded')
     await node(page, 's').click()
+    await showJson(page, 'output')
     await expect(page.getByTestId('output-cut')).toHaveCount(0)
     await page.getByTestId('output-expand').click()
     await expect(page.getByTestId('output-dialog')).toBeVisible()
@@ -296,10 +298,13 @@ test.describe('code editor', () => {
     await page.getByTestId('run').click()
     for (const id of ['js', 'py', 'both']) await expect(node(page, id)).toHaveAttribute('data-status', 'succeeded')
     await node(page, 'js').click()
+    await showJson(page, 'output')
     await expect(page.getByTestId('output-preview')).toContainText('"shout": "HELLO"')
     await node(page, 'py').click()
+    await showJson(page, 'output')
     await expect(page.getByTestId('output-preview')).toContainText('"len": 5')
     await node(page, 'both').click()
+    await showJson(page, 'output')
     await expect(page.getByTestId('output-preview')).toContainText('"a": "HELLO"')
   })
 
@@ -324,6 +329,7 @@ test.describe('code editor', () => {
     await expect(page.getByTestId('edit-saved')).toBeVisible()
     await page.getByTestId('run').click()
     await expect(node(page, 'c')).toHaveAttribute('data-status', 'succeeded')
+    await showJson(page, 'output')
     await expect(page.getByTestId('output-preview')).toContainText('edited in the editor')
   })
 })

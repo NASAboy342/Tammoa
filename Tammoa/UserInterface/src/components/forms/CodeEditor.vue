@@ -28,6 +28,8 @@ const host = ref<HTMLElement | null>(null)
 let view: EditorView | null = null
 const languageSlot = new Compartment()
 const readOnlySlot = new Compartment()
+const placeholderSlot = new Compartment()
+const placeholderExtension = (text?: string): Extension => (text ? placeholderExt(text) : [])
 
 const theme = EditorView.theme({
   '&': { color: 'var(--ink)', backgroundColor: 'var(--surface)', fontSize: '12px', height: '100%' },
@@ -91,7 +93,7 @@ onMounted(() => {
         EditorView.lineWrapping,
         EditorView.contentAttributes.of({ 'aria-label': props.label, spellcheck: 'false', autocapitalize: 'off', autocorrect: 'off' }),
         keymap.of([...closeBracketsKeymap, ...defaultKeymap, ...historyKeymap, indentWithTab]),
-        props.placeholder ? placeholderExt(props.placeholder) : [],
+        placeholderSlot.of(placeholderExtension(props.placeholder)),
         theme,
         languageSlot.of(languageExtension(props.language)),
         readOnlySlot.of(readOnlyExtension(props.readOnly)),
@@ -112,6 +114,10 @@ watch(
 watch(
   () => props.language,
   (language) => view?.dispatch({ effects: languageSlot.reconfigure(languageExtension(language)) }),
+)
+watch(
+  () => props.placeholder,
+  (text) => view?.dispatch({ effects: placeholderSlot.reconfigure(placeholderExtension(text)) }),
 )
 watch(
   () => props.readOnly,

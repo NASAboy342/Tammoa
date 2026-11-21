@@ -37,6 +37,7 @@ public class FlowExecutor : IFlowExecutor
             onChange(run);
         }
         var startedAt = new Dictionary<string, DateTimeOffset>();
+        var inputs = new Dictionary<string, JToken?>(); // what each started card received, kept in its NodeRun
 
         while (true)
         {
@@ -78,7 +79,8 @@ public class FlowExecutor : IFlowExecutor
                     JToken? input = active.Count == 0 ? null : active.Count == 1 ? outputs[active[0].Source] : new JArray(active.Select(e => outputs[e.Source]));
                     var p = nodes[id]["params"] as JObject ?? new JObject();
                     startedAt[id] = now;
-                    Set(id, new NodeRun(id, NodeRunStatus.Running, now));
+                    inputs[id] = input;
+                    Set(id, new NodeRun(id, NodeRunStatus.Running, now, Input: input?.DeepClone()));
                     var context = new CardExecutionContext((JObject)p.DeepClone(), input?.DeepClone(), runInput?.DeepClone());
                     running[Task.Run(() => card.ExecuteAsync(context, ct))] = id;
                     changed = true;
@@ -96,16 +98,16 @@ public class FlowExecutor : IFlowExecutor
                 var result = await done;
                 outputs[doneId] = result.Output;
                 branches[doneId] = result.Branch;
-                Set(doneId, new NodeRun(doneId, NodeRunStatus.Succeeded, startedAt[doneId], finished, result.Output));
+                Set(doneId, new NodeRun(doneId, NodeRunStatus.Succeeded, startedAt[doneId], finished, result.Output, Input: inputs[doneId]?.DeepClone()));
             }
             catch (OperationCanceledException) when (ct.IsCancellationRequested)
             {
-                Set(doneId, new NodeRun(doneId, NodeRunStatus.Cancelled, startedAt[doneId], finished));
+                Set(doneId, new NodeRun(doneId, NodeRunStatus.Cancelled, startedAt[doneId], finished, Input: inputs[doneId]?.DeepClone()));
             }
             catch (Exception ex)
             {
                 if (ex is not (ArgumentException or InvalidOperationException)) Console.Error.WriteLine(ex);
-                Set(doneId, new NodeRun(doneId, NodeRunStatus.Failed, startedAt[doneId], finished, Error: ex.Message));
+                Set(doneId, new NodeRun(doneId, NodeRunStatus.Failed, startedAt[doneId], finished, Error: ex.Message, Input: inputs[doneId]?.DeepClone()));
                 firstError ??= ex.Message;
             }
         }

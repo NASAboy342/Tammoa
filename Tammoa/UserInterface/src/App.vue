@@ -62,7 +62,10 @@ onUnmounted(() => runs.disconnect())
       </button>
     </header>
     <main class="min-h-0 flex-1 overflow-auto">
-      <RouterView />
+      <!-- keyed by path: going straight from one flow to another must build a fresh editor, not reuse the old one -->
+      <RouterView v-slot="{ Component, route: current }">
+        <component :is="Component" :key="current.path" />
+      </RouterView>
     </main>
   </div>
 </template>

@@ -19,6 +19,13 @@ A desktop app for building AI-agent automations from modular **cards** (inspired
 | Read file, Write file | read or write a text file |
 | Ollama | ask a local or remote Ollama model (create a connection first) |
 
+## Using data from another card (read this first)
+1. **Run once.** Then click a card and open its **Input** tab: it lists every field the card received, with its type and a preview. The **copy** button next to a field copies the exact reference, e.g. `{{input.json.name}}`.
+2. **Paste it into a setting** (a prompt, URL, file path, JSON, shell command): it is replaced by the value when the card runs. `{{run.input}}` is what you typed in *Run input*, available in every card.
+3. **In a Script card** the code reads the input directly: **JavaScript** `input` and `runInput` (for example `input.json.name`), **Python** `input_data` and `run_input` (for example `input_data["json"]["name"]`), **Shell** `{{input.stdout | sh}}` or `$TAMMOA_INPUT`. Print **JSON** (`console.log(JSON.stringify({ ok: true }))`) to hand data on: the next card reads `{{input.json.ok}}`. Plain printed text is `{{input.stdout}}`.
+4. **Not run yet?** The Input tab shows the fields the connected card usually provides. The **Output** tab shows what a card produced, and what the next card can use.
+5. **Every card has a Guide tab:** what it does, how its input arrives, its output fields and ready examples. **Use this example** fills in the card's settings. Under every script editor a hint line and a starter (**Insert starter**) show how to read the input in the language you picked.
+
 ## Connections (AI models)
 Open **Connections**, add your Ollama address (default `http://localhost:11434`; an API key is optional and only needed behind a proxy), press **Test** to see its models, then pick the connection and a model in an Ollama card. The key is stored in plain text on this computer in a folder only you can open (`~/Library/Application Support/Tammoa`), never shown again and never put in exported flows.
 

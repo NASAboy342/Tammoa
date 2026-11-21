@@ -36,7 +36,26 @@ public class OllamaCard : ICardType
             new CardParamInfo("think", "Reasoning (think)", ParamKind.Select, DefaultValue: "auto",
                 Options: [new("auto", "Auto (model default)"), new("on", "On"), new("off", "Off")], Help: "For reasoning models such as qwen3. Off is faster; auto sends nothing."),
             new CardParamInfo("timeoutSeconds", "Timeout (seconds)", ParamKind.Number, DefaultValue: 120, Help: "1 to 1800. Small local models can be slow on the first call."),
-        ]);
+        ])
+    {
+        Guide = new CardGuide(
+            "Asks an Ollama model a question and gives you its answer. Choose a connection (your Ollama address) and a model, write a prompt.",
+            "Receives the previous card's output as input. Put {{input.field}} in the prompt to include it; {{run.input}} is the Run input.",
+            new JObject { ["text"] = "Two files were found.", ["model"] = "qwen3:14b", ["done"] = true, ["doneReason"] = "stop", ["promptTokens"] = 23, ["responseTokens"] = 5, ["totalDurationMs"] = 1200.5 },
+            [
+                new GuideExample("Summarise the previous card's output", "The prompt can mix instructions and data.",
+                    new JObject { ["prompt"] = "Summarise this in two sentences:\n{{input.stdout}}", ["think"] = "off" }, "Summarise this in two sentences:\n{{input.stdout}}", "text",
+                    new JObject { ["stdout"] = "a.txt\nb.txt\n" }, "The answer is in {{input.text}} for the next card."),
+                new GuideExample("Get structured data back", "Switch on \"Answer as JSON\" and describe the shape you want.",
+                    new JObject { ["prompt"] = "Return JSON like {\"sentiment\": \"positive\" or \"negative\"} for this review:\n{{run.input}}", ["jsonMode"] = true, ["temperature"] = 0, ["think"] = "off" },
+                    "Return JSON like {\"sentiment\": \"positive\" or \"negative\"} for this review:\n{{run.input}}", "text", RunInput: "Great product, fast delivery",
+                    Result: "The answer is also parsed: the next card reads {{input.json.sentiment}} (e.g. use an IF card on it)."),
+                new GuideExample("Give the model a role", "A system prompt sets the style for every answer.",
+                    new JObject { ["system"] = "You are a terse assistant. Answer in one sentence.", ["prompt"] = "{{run.input}}", ["think"] = "off" },
+                    "System: You are a terse assistant. Answer in one sentence.\nPrompt: {{run.input}}", "text", RunInput: "Why is the sky blue?", Result: "A one-sentence answer in {{input.text}}."),
+            ],
+            ["Output fields: text (the answer), json (JSON mode), thinking (reasoning models), model, promptTokens, responseTokens, totalDurationMs.", "Small models work best with short, direct prompts. Reasoning Off is much faster for models like qwen3.", "The first call loads the model into memory and can take a while; the timeout is 120 s by default."]),
+    };
 
     public async Task<CardResult> ExecuteAsync(CardExecutionContext context, CancellationToken ct)
     {

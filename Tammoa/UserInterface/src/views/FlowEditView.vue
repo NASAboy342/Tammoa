@@ -6,14 +6,15 @@ import FlowSwitch from '@/components/FlowSwitch.vue'
 import DeleteFlowDialog from '@/components/DeleteFlowDialog.vue'
 import FlowCanvas, { type Selection } from '@/components/canvas/FlowCanvas.vue'
 import CardPalette from '@/components/canvas/CardPalette.vue'
-import CardInspector from '@/components/canvas/CardInspector.vue'
+import CardInspector, { type InspectorTab } from '@/components/canvas/CardInspector.vue'
 import RunPanel from '@/components/canvas/RunPanel.vue'
 import { flowApi, type Flow } from '@/services/flowApi'
+import type { GuideExample } from '@/services/cardApi'
 import type { NodeRunStatus } from '@/services/runApi'
 import { useCardTypeStore } from '@/stores/cardTypeStore'
 import { useRunStore } from '@/stores/runStore'
 import { canConnect, freeSpot, hasTrigger, makeNode, newId, removeEdge, removeNode, toDefinition, toDraft, type Draft } from '@/helpers/flowDraft'
-import { parseRunInput } from '@/helpers/runHelpers'
+import { parseRunInput, pickNodeRun } from '@/helpers/runHelpers'
 import { SIDE_DEFAULT, SIDE_MAX, SIDE_MIN, clampSideWidth, widthAfterDrag } from '@/helpers/layout'
 
 const route = useRoute()
@@ -108,6 +109,25 @@ const nodeStates = computed(() => {
 })
 const selectedNode = computed(() => (selection.value?.kind === 'node' ? draft.nodes.find((n) => n.id === selection.value!.id) ?? null : null))
 const selectedNodeRun = computed(() => activeRun.value?.nodes.find((n) => n.nodeId === selectedNode.value?.id))
+// the data tabs show the selected run's data for this card, or else the newest run in which it actually ran
+const nodeData = computed(() => (selectedNode.value ? pickNodeRun(flowRuns.value, activeRun.value?.id ?? null, selectedNode.value.id) : null))
+const inspectorRunInput = computed(() => nodeData.value?.run.input ?? activeRun.value?.input)
+const inspectorTab = ref<InspectorTab>('settings') // remembered while you click from card to card
+const incoming = computed(() =>
+  selectedNode.value
+    ? draft.edges
+        .filter((e) => e.target === selectedNode.value!.id)
+        .map((e) => draft.nodes.find((n) => n.id === e.source))
+        .filter((n): n is NonNullable<typeof n> => !!n)
+        .map((n) => ({ name: n.name, info: cards.byType[n.type] }))
+    : [],
+)
+
+function applyExample(example: GuideExample) {
+  for (const [key, value] of Object.entries(example.params ?? {})) setParam(key, value)
+  inspectorTab.value = 'settings'
+  say(`Example applied: "${example.title}". Edit it if you like, then Save and Run.`)
+}
 
 function adopt(f: Flow) {
   flow.value = f
@@ -304,7 +324,7 @@ const inputCls =
             @remove="removeSelection"
           />
           <p v-if="notice" class="pointer-events-none absolute left-1/2 top-3 flex -translate-x-1/2 items-center gap-1.5 rounded-control border-2 border-dashed border-ink bg-surface px-3 py-1.5 text-xs font-semibold" data-testid="canvas-notice">
-            <AppIcon name="alert" :size="14" /> {{ notice }}
+            <AppIcon name="info" :size="14" /> {{ notice }}
           </p>
           <button
             v-if="selection?.kind === 'edge'"
@@ -344,7 +364,12 @@ const inputCls =
             :info="cards.byType[selectedNode.type]"
             :icon="cards.iconFor(selectedNode.type)"
             :run="selectedNodeRun"
+            :data="nodeData"
+            :run-input="inspectorRunInput"
+            :incoming="incoming"
+            v-model:tab="inspectorTab"
             :now="now"
+            @apply="applyExample"
             @rename="selectedNode.name = $event"
             @param="setParam"
             @remove="removeSelection"

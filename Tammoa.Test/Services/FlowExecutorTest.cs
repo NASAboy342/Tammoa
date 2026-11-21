@@ -89,6 +89,44 @@ public class FlowExecutorTest
         Assert.That(run, Is.SameAs(_snapshots.Last()));
     }
 
+    private static JToken? InputOf(FlowRun r, string id) => r.Nodes.Single(n => n.NodeId == id).Input;
+
+    [Test]
+    public async Task EachCardKeepsTheInputItReceived()
+    {
+        var run = await Run(Def($"[{N("t", "trigger")},{N("a", p: "{\"name\":\"a\",\"out\":{\"v\":1}}")},{N("b", p: "{\"name\":\"b\",\"out\":{\"w\":2}}")},{N("m")}]",
+            $"[{E("t", "a")},{E("t", "b")},{E("a", "m")},{E("b", "m")}]"), "typed");
+        Assert.That(InputOf(run, "t"), Is.Null, "a trigger takes no input (it gets the run input)");
+        Assert.That(InputOf(run, "a"), Is.Not.Null, "a card after the trigger got the trigger's output");
+        Assert.That((string?)InputOf(run, "a")!["from"], Is.EqualTo("t"));
+        Assert.That(InputOf(run, "m"), Is.InstanceOf<JArray>(), "several active connections: a list of their outputs");
+        Assert.That(((JArray)InputOf(run, "m")!).Count, Is.EqualTo(2));
+        Assert.That((int)InputOf(run, "m")![0]!["v"]!, Is.EqualTo(1));
+        Assert.That((int)InputOf(run, "m")![1]!["w"]!, Is.EqualTo(2));
+    }
+
+    [Test]
+    public async Task InputIsKeptWhileRunning_AndAfterAFailure()
+    {
+        var run = await Run(Def($"[{N("t", "trigger")},{N("a", p: "{\"name\":\"a\",\"out\":{\"v\":1}}")},{N("bad", p: "{\"name\":\"bad\",\"fail\":\"boom\"}")}]", $"[{E("t", "a")},{E("a", "bad")}]"));
+        Assert.That(S(run, "bad"), Is.EqualTo(NodeRunStatus.Failed));
+        Assert.That((int)InputOf(run, "bad")!["v"]!, Is.EqualTo(1), "a failed card still shows what it was given, which is the first thing you want to see");
+        lock (_snapshots)
+        {
+            var whileRunning = _snapshots.First(s => S(s, "bad") == NodeRunStatus.Running);
+            Assert.That((int)InputOf(whileRunning, "bad")!["v"]!, Is.EqualTo(1));
+        }
+        Assert.That(run.Nodes.Single(n => n.NodeId == "t").Output, Is.Not.Null);
+    }
+
+    [Test]
+    public async Task SkippedCards_HaveNoInput()
+    {
+        var run = await Run(Def($"[{N("t", "trigger")},{B("if", "false")},{N("yes")}]", $"[{E("t", "if")},{EH("if", "true", "yes")}]"));
+        Assert.That(S(run, "yes"), Is.EqualTo(NodeRunStatus.Skipped));
+        Assert.That(InputOf(run, "yes"), Is.Null);
+    }
+
     [Test]
     public async Task EverySnapshotHasAHigherRevisionThanTheOneBefore()
     {

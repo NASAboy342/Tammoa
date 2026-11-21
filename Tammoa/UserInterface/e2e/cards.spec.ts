@@ -2,7 +2,7 @@ import os from 'node:os'
 import path from 'node:path'
 import fs from 'node:fs'
 import { expect, test } from '@playwright/test'
-import { card, codeOf, edge, makeFlow, node, open, outputOf, runAndWait, setCode, setv, trigger, unique } from './helpers'
+import { card, codeOf, edge, makeFlow, node, open, outputOf, runAndWait, setCode, setv, showJson, trigger, unique } from './helpers'
 import { startFakeOllama } from './fake-ollama'
 
 test.describe('the new cards, end to end through the backend engine', () => {
@@ -235,8 +235,9 @@ test.describe('the Ollama card', () => {
       await page.getByTestId('run-input').fill('hi')
       await page.getByTestId('run').click()
       await expect(node(page, 'ai')).toHaveAttribute('data-status', 'succeeded')
-      await expect(page.getByTestId('inspector-result').getByTestId('output-preview')).toContainText('"text": "fake answer to: Say: hi"')
-      await expect(page.getByTestId('inspector-result').getByTestId('output-preview')).toContainText('"promptTokens": 4')
+      await showJson(page, 'output')
+      await expect(page.getByTestId('output-preview')).toContainText('"text": "fake answer to: Say: hi"')
+      await expect(page.getByTestId('output-preview')).toContainText('"promptTokens": 4')
 
       const chat = fake.chats().at(-1)!
       expect(chat.authorization).toBe('Bearer sekret')

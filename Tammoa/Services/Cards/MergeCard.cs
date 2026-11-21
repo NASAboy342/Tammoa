@@ -12,7 +12,17 @@ public class MergeCard : ICardType
 
     public CardTypeInfo Info { get; } = new(
         TypeId, "Merge", "Combines the outputs of several incoming connections into one object (later ones win on equal keys).",
-        CardCategory.Data, "merge", []);
+        CardCategory.Data, "merge", [])
+    {
+        Guide = new CardGuide(
+            "Combines the outputs of several cards into one object. Connect two or more cards to its input.",
+            "When several connections are active, the card's input is a list of their outputs, in the order the connections were made. Merge joins those objects into one; when two have the same field, the later one wins.",
+            new JObject { ["name"] = "Sok", ["city"] = "Phnom Penh" },
+            [new GuideExample("Join two Set value cards", "Connect \"Set value A\" and \"Set value B\" into Merge.", Code: "A: { \"name\": \"Sok\" }\nB: { \"city\": \"Phnom Penh\" }", Language: "text",
+                SampleInput: new JArray(new JObject { ["name"] = "Sok" }, new JObject { ["city"] = "Phnom Penh" }),
+                Result: "Output { name: \"Sok\", city: \"Phnom Penh\" }. The next card reads {{input.name}} and {{input.city}}.")],
+            ["Every incoming output must be an object.", "Without Merge, a card with two inputs gets a list: {{input[0].name}}, {{input[1].city}}."]),
+    };
 
     public Task<CardResult> ExecuteAsync(CardExecutionContext context, CancellationToken ct)
     {

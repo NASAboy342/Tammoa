@@ -31,7 +31,24 @@ public class HttpRequestCard : ICardType
             new CardParamInfo("body", "Body", ParamKind.Code, CodeLanguage: "text", Help: "Sent for POST / PUT / PATCH / DELETE. JSON is detected automatically."),
             new CardParamInfo("timeoutSeconds", "Timeout (seconds)", ParamKind.Number, DefaultValue: 30, Help: "1 to 600."),
             new CardParamInfo("failOnError", "Fail on HTTP error (not 2xx)", ParamKind.Bool, DefaultValue: true),
-        ]);
+        ])
+    {
+        Guide = new CardGuide(
+            "Calls a web API and gives you the answer. Use it to fetch data, or to send data to another service.",
+            "Receives the previous card's output as input. Put {{input.field}} in the URL, headers or body to use it; {{run.input}} is the Run input.",
+            new JObject { ["status"] = 200, ["ok"] = true, ["headers"] = new JObject { ["content-type"] = "application/json" }, ["text"] = "{\"id\":1,\"name\":\"Sok\"}", ["truncated"] = false, ["json"] = new JObject { ["id"] = 1, ["name"] = "Sok" } },
+            [
+                new GuideExample("Fetch something using a value from the input", "The URL is filled in first, then the request is sent.",
+                    new JObject { ["method"] = "GET", ["url"] = "https://api.example.com/users/{{input.json.id}}" }, "https://api.example.com/users/{{input.json.id}}", "text",
+                    new JObject { ["json"] = new JObject { ["id"] = 7 } },
+                    "Requests /users/7. If the answer is JSON the next card reads {{input.json.name}}; the raw answer is {{input.text}}; the HTTP code is {{input.status}}."),
+                new GuideExample("Send JSON", "POST a body built from the input. JSON bodies are detected automatically.",
+                    new JObject { ["method"] = "POST", ["url"] = "https://api.example.com/items", ["headers"] = "{ \"Authorization\": \"Bearer YOUR_TOKEN\" }", ["body"] = "{ \"name\": \"{{input.json.name}}\" }" },
+                    "{ \"name\": \"{{input.json.name}}\" }", "json", new JObject { ["json"] = new JObject { ["name"] = "Sok" } },
+                    "Sends {\"name\":\"Sok\"}. Replace YOUR_TOKEN with a real key (and remember a flow file contains what you type here)."),
+            ],
+            ["Output fields: status, ok, text (the raw answer), json (when the answer is JSON), headers.", "Any non-2xx answer fails the card unless you switch off \"Fail on HTTP error\".", "Only http:// and https:// addresses work."]),
+    };
 
     public async Task<CardResult> ExecuteAsync(CardExecutionContext context, CancellationToken ct)
     {

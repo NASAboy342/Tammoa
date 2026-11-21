@@ -21,7 +21,23 @@ public class JsonCard : ICardType
             new CardParamInfo("mode", "Mode", ParamKind.Select, Required: true, DefaultValue: "parse", Options: [new("parse", "Parse text → data"), new("stringify", "Stringify data → text")]),
             new CardParamInfo("source", "Source", ParamKind.Text, Required: true, DefaultValue: "{{input.stdout}}", Placeholder: "{{input.text}}"),
             new CardParamInfo("pretty", "Pretty-print (stringify)", ParamKind.Bool, DefaultValue: false),
-        ]);
+        ])
+    {
+        Guide = new CardGuide(
+            "Converts between JSON text and data. Parse turns text (for example the output of a script or an API) into fields you can use. Stringify turns data back into text.",
+            "Receives the previous card's output as input. The Source setting says which part to convert, e.g. {{input.stdout}} (a script's printed text) or {{input.text}}.",
+            new JObject { ["name"] = "Sok", ["tags"] = new JArray("a", "b") },
+            [
+                new GuideExample("Parse what a script printed", "Turn the printed text into fields.",
+                    new JObject { ["mode"] = "parse", ["source"] = "{{input.stdout}}" }, "{{input.stdout}}", "text",
+                    new JObject { ["stdout"] = "{\"name\":\"Sok\",\"tags\":[\"a\",\"b\"]}" },
+                    "Output { name: \"Sok\", tags: [\"a\",\"b\"] }. The next card reads {{input.name}}."),
+                new GuideExample("Stringify some data", "Turn an object into text, e.g. to put it in a file or a prompt.",
+                    new JObject { ["mode"] = "stringify", ["source"] = "{{input}}", ["pretty"] = true }, "{{input}}", "text",
+                    new JObject { ["name"] = "Sok" }, "Output { text: \"{ \\\"name\\\": \\\"Sok\\\" }\" } (indented). Next card: {{input.text}}."),
+            ],
+            ["If the Script card printed JSON you do not need this card: read {{input.json.field}} directly.", "A JSON list or number is wrapped as { value: … }."]),
+    };
 
     public Task<CardResult> ExecuteAsync(CardExecutionContext context, CancellationToken ct)
     {

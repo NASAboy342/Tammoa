@@ -10,6 +10,8 @@ export interface NodeRun {
   finishedAt?: string
   output?: unknown
   error?: string
+  /** What the card received (absent for a trigger and for cards that did not run). */
+  input?: unknown
 }
 
 /** A complete snapshot of a run. The backend owns the state; the UI only displays snapshots. */

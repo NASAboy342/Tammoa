@@ -32,6 +32,36 @@ export interface CardParamInfo {
   codeLanguageParam?: string
   /** Connection: only connections of this provider. */
   provider?: string
+  /** Code: one-line "how do I read the input" hint per language, shown under the editor. */
+  codeHelp?: Record<string, string>
+  /** Code: starter text per language, shown while the editor is empty. */
+  codePlaceholders?: Record<string, string>
+}
+
+/** One worked example of a card's tutorial. */
+export interface GuideExample {
+  title: string
+  description: string
+  /** Settings that "Use this example" applies to the card. */
+  params?: Record<string, unknown>
+  code?: string
+  language?: string
+  /** The input the example assumes (what the previous card output). */
+  sampleInput?: unknown
+  /** The Run input the example assumes. */
+  runInput?: unknown
+  /** What the card then outputs and how the next card can use it. */
+  result?: string
+}
+
+/** A card's tutorial, written by the backend and shown as is by the UI. */
+export interface CardGuide {
+  overview: string
+  inputNote: string
+  /** Also the "fields this card will provide" shown to the card connected after it, before anything has run. */
+  outputExample?: unknown
+  examples: GuideExample[]
+  tips?: string[]
 }
 
 export interface CardTypeInfo {
@@ -44,6 +74,7 @@ export interface CardTypeInfo {
   params: CardParamInfo[]
   /** Output handles; most cards have a single 'main', IF has 'true' and 'false'. */
   outputs: CardOutputInfo[]
+  guide?: CardGuide
 }
 
 /** The backend owns the card catalogue; the UI draws cards and their forms from this and has no card-specific code. */

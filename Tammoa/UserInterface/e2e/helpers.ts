@@ -36,6 +36,15 @@ export async function drag(page: Page, from: Locator, to: Locator) {
 export const node = (page: Page, id: string) => page.getByTestId(`node-${id}`)
 export const nodeCount = (page: Page) => page.locator('[data-node-card]').count()
 
+export type InspectorTab = 'settings' | 'input' | 'output' | 'guide'
+export const openTab = (page: Page, tab: InspectorTab) => page.getByTestId(`inspector-tab-${tab}`).click()
+
+/** Opens the Input or Output tab and switches it to the raw JSON view (the field list is the default view). */
+export async function showJson(page: Page, tab: 'input' | 'output') {
+  await openTab(page, tab)
+  await page.getByTestId(`${tab}-data`).getByTestId('view-json').click()
+}
+
 /** Replaces the whole content of a code field (CodeMirror) with `text`. */
 export async function setCode(page: Page, testid: string, text: string) {
   const content = page.getByTestId(testid).locator('.cm-content').first()

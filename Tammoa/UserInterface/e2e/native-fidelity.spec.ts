@@ -93,6 +93,25 @@ test('the side panel resizes in WebKit and the canvas draws cards and connection
   await page.screenshot({ path: 'test-results/webkit-editor.png' })
 })
 
+test('Input, Output and Guide tabs, the field list and the example snippets render in WebKit', async ({ page, request }) => {
+  const flow = await makeFlow(request, [trigger(), card('a', 'script.shell', { command: `echo '{"name":"Sok","items":["a","b"]}'` }, 280), card('b', 'script.shell', { language: 'javascript', command: 'console.log(input.json.name)' }, 560)], [edge('t', 'a'), edge('a', 'b')])
+  await open(page, flow.id)
+  await page.getByTestId('run-input').fill('hello')
+  await page.getByTestId('run').click()
+  await expect(node(page, 'b')).toHaveAttribute('data-status', 'succeeded')
+  await node(page, 'b').click()
+  await expect(page.getByTestId('code-hint')).toContainText('input.json.name') // language-specific hint under the editor
+  await page.getByTestId('inspector-tab-input').click()
+  await expect(page.locator('[data-path="input.json.name"]')).toBeVisible()
+  await expect(page.locator('[data-path="input.json.items[0]"]')).toBeVisible()
+  await expect(page.locator('[data-path="run.input"]').getByTestId('field-preview')).toHaveText('hello')
+  await page.screenshot({ path: 'test-results/webkit-input-tab.png' })
+  await page.getByTestId('inspector-tab-guide').click()
+  await expect(page.getByTestId('guide-example')).not.toHaveCount(0)
+  await expect(page.getByTestId('guide-example').first().locator('.cm-content')).toContainText('const name = input.json.name')
+  await page.screenshot({ path: 'test-results/webkit-guide-tab.png' })
+})
+
 test('live run state arrives over server-sent events in WebKit', async ({ page, request }) => {
   const flow = await makeFlow(request, [trigger(), card('s', 'script.shell', { command: 'echo webkit' })], [edge('t', 's')])
   await open(page, flow.id)

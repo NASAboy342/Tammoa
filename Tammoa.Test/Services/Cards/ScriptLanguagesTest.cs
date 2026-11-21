@@ -16,7 +16,7 @@ public class ScriptLanguagesTest
     {
         public string? Command;
         public IReadOnlyDictionary<string, string>? Env;
-        public string? ScriptText, InputFileText;
+        public string? ScriptText, InputFileText, RunInputFileText, WrapperText;
         public string? WorkingDirectory;
         public ProcessResult Result = new(0, "ok", "", false, false);
 
@@ -25,9 +25,10 @@ public class ScriptLanguagesTest
             Command = command;
             Env = environment;
             WorkingDirectory = workingDirectory;
-            var m = System.Text.RegularExpressions.Regex.Match(command, "'([^']+script\\.(?:js|py))'");
-            if (m.Success) ScriptText = File.ReadAllText(m.Groups[1].Value);
+            if (environment is not null && environment.TryGetValue("TAMMOA_SCRIPT_FILE", out var script)) ScriptText = File.ReadAllText(script);
             if (environment is not null && environment.TryGetValue("TAMMOA_INPUT_FILE", out var f)) InputFileText = File.ReadAllText(f);
+            if (environment is not null && environment.TryGetValue("TAMMOA_RUN_INPUT_FILE", out var r)) RunInputFileText = File.ReadAllText(r);
+            if (System.Text.RegularExpressions.Regex.Match(command, "'([^']+wrapper\\.(?:js|py))'") is { Success: true } w) WrapperText = File.ReadAllText(w.Groups[1].Value);
             return Task.FromResult(Result);
         }
     }
@@ -46,11 +47,23 @@ public class ScriptLanguagesTest
         var input = JObject.Parse("{\"x\":1}");
         await card.ExecuteAsync(Ctx(Json(new { language = "javascript", command = "console.log({{not a template}})" }), input, "run-value"), default);
 
-        Assert.That(spy.Command, Does.StartWith("node '").And.Contain("script.js"));
+        Assert.That(spy.Command, Does.StartWith("node '").And.Contain("wrapper.js"));
         Assert.That(spy.ScriptText, Is.EqualTo("console.log({{not a template}})"), "JavaScript is not templated");
         Assert.That(spy.Env!["TAMMOA_INPUT"], Is.EqualTo("{\"x\":1}"));
         Assert.That(spy.Env["TAMMOA_RUN_INPUT"], Is.EqualTo("\"run-value\""));
         Assert.That(spy.InputFileText, Is.EqualTo("{\"x\":1}"));
+        Assert.That(spy.RunInputFileText, Is.EqualTo("\"run-value\""));
+        Assert.That(spy.WrapperText, Does.Contain("globalThis.input").And.Contain("globalThis.runInput").And.Contain("require(process.env.TAMMOA_SCRIPT_FILE)"));
+    }
+
+    [Test]
+    public async Task Python_WrapperDefinesInputData_AndLeavesTheBuiltinInputAlone()
+    {
+        var (card, spy) = Make();
+        await card.ExecuteAsync(Ctx(Json(new { language = "python", command = "print(input_data)" }), JObject.Parse("{\"x\":1}"), "r"), default);
+        Assert.That(spy.WrapperText, Does.Contain("input_data = json.load").And.Contain("run_input = json.load"));
+        Assert.That(spy.WrapperText, Does.Not.Match(@"(?m)^\s*input\s*="), "must not shadow Python's input()");
+        Assert.That(spy.ScriptText, Is.EqualTo("print(input_data)"), "the user's code is run unchanged, so line numbers match");
     }
 
     [Test]
@@ -58,7 +71,7 @@ public class ScriptLanguagesTest
     {
         var (card, spy) = Make();
         await card.ExecuteAsync(Ctx(Json(new { language = "python", command = "print(1)" })), default);
-        Assert.That(spy.Command, Does.StartWith(OperatingSystem.IsWindows() ? "python " : "python3 ").And.Contain("script.py"));
+        Assert.That(spy.Command, Does.StartWith(OperatingSystem.IsWindows() ? "python " : "python3 ").And.Contain("wrapper.py"));
         await card.ExecuteAsync(Ctx(Json(new { language = "python", command = "print(1)", interpreter = "/opt/py/bin/python3.12" })), default);
         Assert.That(spy.Command, Does.StartWith("/opt/py/bin/python3.12 '"));
     }
@@ -99,6 +112,17 @@ public class ScriptLanguagesTest
         var (card2, _) = Make(new ProcessResult(0, "plain text", "", false, false));
         var r2 = (await card2.ExecuteAsync(Ctx(Json(new { language = "javascript", command = "1" })), default)).Output;
         Assert.That(r2["json"], Is.Null);
+    }
+
+    [TestCase("starting...\nloaded 3 rows\n{\"ok\":true}\n", true)]
+    [TestCase("{\"a\":1}\n{\"b\":2}\n", true)]      // not one JSON document, but the last line is
+    [TestCase("only text\nmore text\n", false)]
+    [TestCase("progress\n{not json\n", false)]
+    public async Task OutputJson_FallsBackToTheLastLine(string stdout, bool expectJson)
+    {
+        var (card, _) = Make(new ProcessResult(0, stdout, "", false, false));
+        var r = (await card.ExecuteAsync(Ctx(Json(new { language = "shell", command = "x" })), default)).Output;
+        Assert.That(r["json"] is not null, Is.EqualTo(expectJson));
     }
 
     [Test]
@@ -174,6 +198,52 @@ public class ScriptRuntimesTest
         if (!Found("python3")) Assert.Ignore("python3 is not installed");
         var ex = Assert.ThrowsAsync<InvalidOperationException>(() => Card.ExecuteAsync(new CardExecutionContext(JObject.Parse(Json(new { language = "python", command = "def (" })), null, null), default));
         Assert.That(ex!.Message, Does.Contain("SyntaxError"));
+    }
+
+    [Test]
+    public async Task Node_ReadyMadeVariables_InputAndRunInput()
+    {
+        if (!Found("node")) Assert.Ignore("node is not installed");
+        var code = "const city = input.json.city\nconsole.log('looking up ' + city)\nconsole.log(JSON.stringify({ city: city.toUpperCase(), asked: runInput, keys: Object.keys(input) }))";
+        var r = (await Card.ExecuteAsync(new CardExecutionContext(JObject.Parse(Json(new { language = "javascript", command = code })), JObject.Parse("{\"json\":{\"city\":\"phnom penh\"},\"stdout\":\"x\"}"), "from the run box"), default)).Output;
+        Assert.That((string?)r["json"]!["city"], Is.EqualTo("PHNOM PENH"), "the log line before the JSON did not hide the JSON");
+        Assert.That((string?)r["json"]!["asked"], Is.EqualTo("from the run box"));
+        Assert.That(r["json"]!["keys"]!.Select(k => (string?)k), Is.EqualTo(new[] { "json", "stdout" }));
+    }
+
+    [Test]
+    public async Task Python_ReadyMadeVariables_InputDataAndRunInput_AndInputBuiltinStillWorks()
+    {
+        if (!Found("python3")) Assert.Ignore("python3 is not installed");
+        var code = "import json\nname = input_data['json']['name']\nline = input()\nprint(json.dumps({'hello': 'hi ' + name, 'run': run_input, 'stdin': line}))";
+        var ctx = new CardExecutionContext(JObject.Parse(Json(new { language = "python", command = code, stdin = "typed\n" })), JObject.Parse("{\"json\":{\"name\":\"Sok\"}}"), JObject.Parse("{\"n\":2}"));
+        var r = (await Card.ExecuteAsync(ctx, default)).Output;
+        Assert.That((string?)r["json"]!["hello"], Is.EqualTo("hi Sok"));
+        Assert.That((int)r["json"]!["run"]!["n"]!, Is.EqualTo(2));
+        Assert.That((string?)r["json"]!["stdin"], Is.EqualTo("typed"), "the built-in input() still reads stdin");
+    }
+
+    [Test]
+    public void Node_ErrorLineNumbersPointAtTheUsersCode()
+    {
+        if (!Found("node")) Assert.Ignore("node is not installed");
+        var ex = Assert.ThrowsAsync<InvalidOperationException>(() => Card.ExecuteAsync(new CardExecutionContext(JObject.Parse(Json(new { language = "javascript", command = "const a = 1\nconst b = 2\nthrow new Error('boom on line 3')" })), null, null), default));
+        Assert.That(ex!.Message, Does.Contain("script.js:3").And.Contain("boom on line 3"));
+    }
+
+    [Test]
+    public void Python_ErrorLineNumbersPointAtTheUsersCode()
+    {
+        if (!Found("python3")) Assert.Ignore("python3 is not installed");
+        var ex = Assert.ThrowsAsync<InvalidOperationException>(() => Card.ExecuteAsync(new CardExecutionContext(JObject.Parse(Json(new { language = "python", command = "a = 1\nb = 2\nraise ValueError('boom on line 3')" })), null, null), default));
+        Assert.That(ex!.Message, Does.Contain("boom on line 3"));
+    }
+
+    [Test]
+    public void Node_TopLevelReturnAndRequireWork_ImportsDoNot_ButTheMessageSaysWhy()
+    {
+        if (!Found("node")) Assert.Ignore("node is not installed");
+        Assert.DoesNotThrowAsync(() => Card.ExecuteAsync(new CardExecutionContext(JObject.Parse(Json(new { language = "javascript", command = "const os = require('os')\nif (!os) return\nconsole.log('ok')" })), null, null), default));
     }
 
     [Test]

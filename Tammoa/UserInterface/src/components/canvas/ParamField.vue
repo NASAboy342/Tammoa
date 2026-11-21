@@ -15,7 +15,7 @@ import { useConnectionStore } from '@/stores/connectionStore'
 import { editorLanguage } from '@/helpers/layout'
 
 const props = defineProps<{ param: CardParamInfo; modelValue: unknown; values: Record<string, unknown> }>()
-const emit = defineEmits<{ 'update:modelValue': [value: unknown] }>()
+const emit = defineEmits<{ 'update:modelValue': [value: unknown]; 'open-guide': [] }>()
 
 const connections = useConnectionStore()
 const icon: Record<CardParamInfo['kind'], IconName> = { text: 'edit', textarea: 'edit', number: 'hash', bool: 'check', select: 'list', code: 'code', connection: 'plug' }
@@ -94,9 +94,11 @@ if (props.param.kind === 'connection' && !connections.connections.length && !con
       :model-value="str()"
       :label="param.label"
       :language="editorLanguage(param, values)"
-      :placeholder="param.placeholder"
+      :placeholder="param.codePlaceholders?.[editorLanguage(param, values)] ?? param.placeholder"
+      :hint="param.codeHelp?.[editorLanguage(param, values)]"
       :testid="`param-input-${param.key}`"
       @update:model-value="emit('update:modelValue', $event)"
+      @open-guide="emit('open-guide')"
     />
 
     <IconSelect

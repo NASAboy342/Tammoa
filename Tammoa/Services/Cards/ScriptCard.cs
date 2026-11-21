@@ -7,14 +7,39 @@ using Tammoa.Models;
 namespace Tammoa.Services.Cards;
 
 /// <summary>Runs code in Shell, JavaScript (Node) or Python. The type id stays "script.shell" so existing flows keep working.
-/// Input contract for every language: env TAMMOA_INPUT (JSON of the card input, when it is at most 64 KB), TAMMOA_RUN_INPUT
-/// (JSON of the value passed with the run, same limit) and TAMMOA_INPUT_FILE (path of a temp file holding the input JSON, always set).</summary>
+/// Reading the input:
+///  - JavaScript: the variables <c>input</c> (the card input) and <c>runInput</c> (the value passed with the run) are ready to use.
+///  - Python: <c>input_data</c> and <c>run_input</c> (the built-in <c>input()</c> is left alone).
+///  - Every language: env TAMMOA_INPUT / TAMMOA_RUN_INPUT (JSON text, set when at most 64 KB) and TAMMOA_INPUT_FILE / TAMMOA_RUN_INPUT_FILE
+///    (paths of temp files with the JSON, always set). Shell code can also use {{ }} templates.
+/// JS and Python run through a tiny wrapper that defines the variables and then loads your code from its own file, so error line numbers
+/// are those of your code.</summary>
 public class ScriptCard : ICardType
 {
     public const string TypeId = "script.shell";
     public const int DefaultTimeoutSeconds = 30;
     public const int MaxTimeoutSeconds = 600;
     public const int MaxEnvJsonLength = 64 * 1024;
+
+    // The wrappers define the ready-made variables, then load the user's file untouched (CommonJS require / Python exec of the compiled file).
+    private const string JavaScriptWrapper = """
+        const fs = require('fs');
+        globalThis.input = JSON.parse(fs.readFileSync(process.env.TAMMOA_INPUT_FILE, 'utf8'));
+        globalThis.runInput = JSON.parse(fs.readFileSync(process.env.TAMMOA_RUN_INPUT_FILE, 'utf8'));
+        require(process.env.TAMMOA_SCRIPT_FILE);
+        """;
+
+    private const string PythonWrapper = """
+        import json, os
+        _script = os.environ['TAMMOA_SCRIPT_FILE']
+        with open(os.environ['TAMMOA_INPUT_FILE'], encoding='utf-8') as _f:
+            input_data = json.load(_f)
+        with open(os.environ['TAMMOA_RUN_INPUT_FILE'], encoding='utf-8') as _f:
+            run_input = json.load(_f)
+        with open(_script, encoding='utf-8') as _f:
+            _code = compile(_f.read(), _script, 'exec')
+        exec(_code, {'__name__': '__main__', '__file__': _script, 'input_data': input_data, 'run_input': run_input})
+        """;
 
     private static readonly string[] Languages = ["shell", "javascript", "python"];
     private readonly ITemplateEngine _templates;
@@ -28,21 +53,25 @@ public class ScriptCard : ICardType
 
     public CardTypeInfo Info { get; } = new(
         TypeId, "Script",
-        "Runs Shell, JavaScript (Node) or Python code. The code reads its input from $TAMMOA_INPUT (JSON) and prints its result; if the output is JSON it is also available as { json }. Output: { stdout, stderr, exitCode, json? }.",
+        "Runs Shell, JavaScript (Node) or Python code. JavaScript gets the ready-made variables input and runInput, Python input_data and run_input. Print JSON and it is available to the next card as { json }. Output: { stdout, stderr, exitCode, json? }.",
         CardCategory.Action, "terminal",
         [
             new CardParamInfo("language", "Language", ParamKind.Select, Required: true, DefaultValue: "shell",
                 Options: [new("shell", "Shell (sh / cmd)"), new("javascript", "JavaScript (Node)"), new("python", "Python")]),
             new CardParamInfo("command", "Code", ParamKind.Code, Required: true, CodeLanguageParam: "language",
                 Placeholder: "echo hello",
-                Help: "Shell code may use {{input.x | sh}} templates. JavaScript and Python are not templated: read $TAMMOA_INPUT instead."),
+                Help: "Shell code may use {{input.x | sh}} templates. JavaScript and Python are not templated: use their ready-made input variables (see the Guide tab).",
+                CodeHelp: ScriptGuide.CodeHelp, CodePlaceholders: ScriptGuide.CodePlaceholders),
             new CardParamInfo("interpreter", "Interpreter (optional)", ParamKind.Text,
                 Help: "Default: node for JavaScript, python3 for Python (python on Windows). Set a full path or a command like python3.12 if needed."),
             new CardParamInfo("workingDirectory", "Working directory", ParamKind.Text, Help: "Empty = your home folder."),
             new CardParamInfo("stdin", "Standard input", ParamKind.Textarea, Help: "Optional text piped to the program."),
             new CardParamInfo("timeoutSeconds", "Timeout (seconds)", ParamKind.Number, DefaultValue: DefaultTimeoutSeconds, Help: "1 to 600."),
             new CardParamInfo("failOnError", "Fail on non-zero exit", ParamKind.Bool, DefaultValue: true),
-        ]);
+        ])
+    {
+        Guide = ScriptGuide.Create(),
+    };
 
     public async Task<CardResult> ExecuteAsync(CardExecutionContext context, CancellationToken ct)
     {
@@ -52,7 +81,7 @@ public class ScriptCard : ICardType
         if (!Languages.Contains(language)) throw new ArgumentException($"Unknown language '{language}' (use shell, javascript or python).");
 
         var code = ParamReader.GetString(context.Params, "command");
-        if (code.Trim().Length == 0) throw new ArgumentException("Code is empty.");
+        if (code.Trim().Length == 0) throw new ArgumentException("Code is empty. Write some, or open the Guide tab and press \"Use this example\".");
         if (language == "shell") code = _templates.Render(code, ctx);
 
         var wdParam = _templates.Render(ParamReader.GetString(context.Params, "workingDirectory"), ctx).Trim();
@@ -72,20 +101,26 @@ public class ScriptCard : ICardType
             var inputJson = (context.Input ?? JValue.CreateNull()).ToString(Formatting.None);
             var inputFile = Path.Combine(scratch, "input.json");
             await File.WriteAllTextAsync(inputFile, inputJson, ct);
-            var env = new Dictionary<string, string> { ["TAMMOA_INPUT_FILE"] = inputFile };
-            if (inputJson.Length <= MaxEnvJsonLength) env["TAMMOA_INPUT"] = inputJson;
             var runJson = (context.RunInput ?? JValue.CreateNull()).ToString(Formatting.None);
+            var runInputFile = Path.Combine(scratch, "run-input.json");
+            await File.WriteAllTextAsync(runInputFile, runJson, ct);
+            var env = new Dictionary<string, string> { ["TAMMOA_INPUT_FILE"] = inputFile, ["TAMMOA_RUN_INPUT_FILE"] = runInputFile };
+            if (inputJson.Length <= MaxEnvJsonLength) env["TAMMOA_INPUT"] = inputJson;
             if (runJson.Length <= MaxEnvJsonLength) env["TAMMOA_RUN_INPUT"] = runJson;
 
             string command, interpreter = "";
             if (language == "shell") command = code;
             else
             {
-                var file = Path.Combine(scratch, language == "javascript" ? "script.js" : "script.py");
+                var js = language == "javascript";
+                var file = Path.Combine(scratch, js ? "script.js" : "script.py");
+                var wrapper = Path.Combine(scratch, js ? "wrapper.js" : "wrapper.py");
                 await File.WriteAllTextAsync(file, code, ct);
+                await File.WriteAllTextAsync(wrapper, (js ? JavaScriptWrapper : PythonWrapper).Replace("\r\n", "\n"), ct);
+                env["TAMMOA_SCRIPT_FILE"] = file;
                 interpreter = ParamReader.GetString(context.Params, "interpreter").Trim();
-                if (interpreter.Length == 0) interpreter = language == "javascript" ? "node" : OperatingSystem.IsWindows() ? "python" : "python3";
-                command = $"{interpreter} {QuotePath(file)}";
+                if (interpreter.Length == 0) interpreter = js ? "node" : OperatingSystem.IsWindows() ? "python" : "python3";
+                command = $"{interpreter} {QuotePath(wrapper)}";
             }
 
             var result = await _runner.RunAsync(command, workingDirectory, stdin, TimeSpan.FromSeconds(seconds), ct, env);
@@ -108,10 +143,14 @@ public class ScriptCard : ICardType
                 ["timedOut"] = false,
                 ["truncated"] = result.Truncated,
             };
+            // `json` = the output parsed as JSON. If the whole output is not JSON (e.g. log lines first), the last line is tried,
+            // so a script can print progress and finish with its JSON result.
             var trimmed = result.Stdout.Trim();
             if (trimmed.Length > 0 && !result.Truncated)
             {
-                try { output["json"] = JToken.Parse(trimmed); } catch (JsonReaderException) { /* plain text output */ }
+                var parsed = TryParseJson(trimmed);
+                if (parsed is null && trimmed.Contains('\n')) parsed = TryParseJson(trimmed[(trimmed.LastIndexOf('\n') + 1)..].Trim());
+                if (parsed is not null) output["json"] = parsed;
             }
             return output;
         }
@@ -119,6 +158,12 @@ public class ScriptCard : ICardType
         {
             try { Directory.Delete(scratch, true); } catch (IOException) { /* best effort */ }
         }
+    }
+
+    private static JToken? TryParseJson(string text)
+    {
+        try { return JToken.Parse(text); }
+        catch (JsonReaderException) { return null; }
     }
 
     private static string QuotePath(string path) =>

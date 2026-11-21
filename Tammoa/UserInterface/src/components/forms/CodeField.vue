@@ -9,12 +9,13 @@ import ModalShell from '@/components/ModalShell.vue'
 // CodeMirror is ~500 kB: load it only when a code field is actually shown
 const CodeEditor = defineAsyncComponent(() => import('./CodeEditor.vue'))
 
-const props = withDefaults(defineProps<{ modelValue: string; label: string; language: string; placeholder?: string; testid?: string; readOnly?: boolean }>(), {
+const props = withDefaults(defineProps<{ modelValue: string; label: string; language: string; placeholder?: string; testid?: string; readOnly?: boolean; hint?: string }>(), {
   placeholder: undefined,
+  hint: undefined,
   testid: undefined,
   readOnly: false,
 })
-const emit = defineEmits<{ 'update:modelValue': [value: string] }>()
+const emit = defineEmits<{ 'update:modelValue': [value: string]; 'open-guide': [] }>()
 
 const expanded = ref(false)
 const LANGUAGE_LABEL: Record<string, string> = { shell: 'Shell', javascript: 'JavaScript', python: 'Python', json: 'JSON', text: 'Text' }
@@ -28,6 +29,17 @@ const languageLabel = () => LANGUAGE_LABEL[props.language] ?? props.language
       <span class="text-[11px] font-semibold text-ink-soft" data-testid="code-language">{{ languageLabel() }}</span>
       <span class="flex-1" />
       <button
+        v-if="placeholder && !readOnly && modelValue.trim() === ''"
+        type="button"
+        class="inline-flex min-h-6 items-center gap-1 rounded-control border border-line-strong bg-surface px-1.5 text-[11px] font-semibold hover:bg-surface-hover"
+        title="The grey text is only a hint. Put it in as real code and edit it."
+        aria-label="Insert the starter code"
+        data-testid="code-insert-starter"
+        @click="emit('update:modelValue', placeholder)"
+      >
+        <AppIcon name="plus" :size="11" /> Insert starter
+      </button>
+      <button
         type="button"
         class="inline-flex h-6 w-6 items-center justify-center rounded-control hover:bg-surface-hover"
         title="Open in a larger editor"
@@ -40,6 +52,13 @@ const languageLabel = () => LANGUAGE_LABEL[props.language] ?? props.language
     </div>
     <div class="code-resize" data-testid="code-resize">
       <CodeEditor :model-value="modelValue" :language="language" :label="label" :placeholder="placeholder" :read-only="readOnly" @update:model-value="emit('update:modelValue', $event)" />
+    </div>
+    <div v-if="hint" class="flex items-start gap-1.5 border-t border-line bg-surface-muted px-2 py-1.5" data-testid="code-hint">
+      <AppIcon name="bulb" :size="12" class="mt-0.5 shrink-0 text-muted" />
+      <p class="min-w-0 flex-1 break-words font-mono text-[11px] leading-snug text-ink-soft">{{ hint }}</p>
+      <button type="button" class="inline-flex min-h-6 shrink-0 items-center gap-1 rounded-control border border-line-strong bg-surface px-1.5 text-[11px] font-semibold hover:bg-surface-hover" title="Open the guide with examples" aria-label="Open the guide with examples" data-testid="code-open-guide" @click="emit('open-guide')">
+        <AppIcon name="book" :size="11" /> Examples
+      </button>
     </div>
 
     <ModalShell v-if="expanded" size="xl" testid="code-dialog" labelledby="code-dialog-title" @close="expanded = false">

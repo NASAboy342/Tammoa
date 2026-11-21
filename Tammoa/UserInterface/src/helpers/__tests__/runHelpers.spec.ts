@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { formatDuration, nodeStatusIcon, parseRunInput, prettyOutput, runStatusIcon, statusLabel } from '../runHelpers'
+import { formatDuration, nodeStatusIcon, parseRunInput, prettyOutput, roundsOf, runStatusIcon, statusLabel } from '../runHelpers'
 import { ICONS } from '@/components/icons/icons'
 
 describe('status icons', () => {
@@ -42,5 +42,31 @@ describe('prettyOutput', () => {
     expect(prettyOutput({ a: 1 })).toBe('{\n  "a": 1\n}')
     expect(prettyOutput('plain')).toBe('plain')
     expect(prettyOutput('x'.repeat(50), 10)).toContain('40 more characters')
+  })
+})
+
+describe('roundsOf: a card that ran several times in a loop', () => {
+  it('a card that ran once has one round, which is the current one', () => {
+    const rounds = roundsOf({ nodeId: 'a', status: 'succeeded', input: { n: 1 }, output: { n: 2 } })
+    expect(rounds).toHaveLength(1)
+    expect(rounds[0]).toMatchObject({ iteration: 1, current: true, input: { n: 1 }, output: { n: 2 }, status: 'succeeded' })
+  })
+
+  it('earlier rounds come first (oldest to newest), then the current one', () => {
+    const rounds = roundsOf({
+      nodeId: 'a', status: 'running', iteration: 3, input: { n: 2 },
+      previous: [
+        { iteration: 1, status: 'succeeded', input: { n: 0 }, output: { n: 1 } },
+        { iteration: 2, status: 'succeeded', input: { n: 1 }, output: { n: 2 } },
+      ],
+    })
+    expect(rounds.map((r) => [r.iteration, r.current])).toEqual([[1, false], [2, false], [3, true]])
+    expect(rounds[0].output).toEqual({ n: 1 })
+    expect(rounds[2].status).toBe('running')
+  })
+
+  it('a failed earlier round keeps its error', () => {
+    const rounds = roundsOf({ nodeId: 'a', status: 'succeeded', iteration: 2, previous: [{ iteration: 1, status: 'failed', error: 'boom' }] })
+    expect(rounds[0]).toMatchObject({ status: 'failed', error: 'boom', current: false })
   })
 })

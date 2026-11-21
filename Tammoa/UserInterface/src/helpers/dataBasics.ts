@@ -1,5 +1,5 @@
 /** The short "how data moves between cards" lesson shown in the Input tab and the guides. Generic: nothing here is about one card. */
-export const DATA_BASICS: { icon: 'arrow-right' | 'edit' | 'zap' | 'code' | 'database'; title: string; text: string; example: string }[] = [
+export const DATA_BASICS: { icon: 'arrow-right' | 'edit' | 'zap' | 'code' | 'database' | 'refresh'; title: string; text: string; example: string }[] = [
   {
     icon: 'arrow-right',
     title: 'Each card receives the output of the card before it',
@@ -23,6 +23,12 @@ export const DATA_BASICS: { icon: 'arrow-right' | 'edit' | 'zap' | 'code' | 'dat
     title: 'In JavaScript and Python code use the ready-made variables',
     text: 'JavaScript: input and runInput. Python: input_data and run_input. Shell: $TAMMOA_INPUT.',
     example: 'input.json.name   ·   input_data["json"]["name"]',
+  },
+  {
+    icon: 'refresh',
+    title: 'A connection can go back to an earlier card: that is a loop',
+    text: 'The earlier card runs again with the new input, until an IF sends the flow the other way. Cards after the loop run once, when it is over. A card runs at most 50 times per run.',
+    example: 'IF true → back to the card before it',
   },
   {
     icon: 'database',

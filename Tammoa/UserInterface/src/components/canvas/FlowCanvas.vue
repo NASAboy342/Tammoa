@@ -1,7 +1,9 @@
 <script setup lang="ts">
 /**
  * The card canvas: pan (drag the background or scroll), zoom (Ctrl/Cmd + scroll or the buttons), drag cards,
- * connect by dragging from a card's output handle onto another card, click to select, Delete removes the selection.
+ * connect by dragging from a card's output handle onto another card (also back onto an EARLIER card: that makes a loop, drawn dashed
+ * under the cards), resize a card by its bottom-right corner, click to select, Delete removes the selection.
+ * A card is as big as its title needs unless the user dragged it to a size.
  * Presentational: cards, connections and run states come in as props; every change goes out as an event.
  * It never executes anything: states are whatever the backend reported.
  */
@@ -11,7 +13,9 @@ import type { IconName } from '@/components/icons/icons'
 import type { CardTypeInfo } from '@/services/cardApi'
 import type { NodeRunStatus } from '@/services/runApi'
 import type { DraftEdge, DraftNode } from '@/helpers/flowDraft'
-import { NODE_H, NODE_W, edgePath, inputPort, outputPort, screenToWorld, zoomAt, type Point, type View } from '@/helpers/canvasMath'
+import { NODE_H, NODE_W, edgePath, inputPort, loopEdgePath, outputPort, screenToWorld, zoomAt, type Point, type Size, type View } from '@/helpers/canvasMath'
+import { MAX_MANUAL, MIN_MANUAL, sizeOf, titleLines } from '@/helpers/cardSize'
+import { findLoops } from '@/helpers/loops'
 import { nodeStatusIcon, statusLabel } from '@/helpers/runHelpers'
 
 export type Selection = { kind: 'node' | 'edge'; id: string }
@@ -22,12 +26,16 @@ const props = defineProps<{
   types: Record<string, CardTypeInfo>
   iconFor: (type: string) => IconName
   states: Record<string, NodeRunStatus>
+  /** How many times each card has run in the shown run (shown as ×N when it ran more than once, i.e. in a loop). */
+  rounds?: Record<string, number>
   selection: Selection | null
 }>()
 const emit = defineEmits<{
   move: [id: string, x: number, y: number]
   select: [selection: Selection | null]
   connect: [source: string, target: string, handle: string]
+  resize: [id: string, w: number, h: number]
+  fit: [id: string]
   remove: []
 }>()
 
@@ -38,18 +46,38 @@ const link = ref<{ source: string; handle: string; to: Point } | null>(null)
 const byId = computed(() => new Map(props.nodes.map((n) => [n.id, n])))
 /** The output handles of a card, in display order (most cards have just "main"). */
 const outputsOf = (node: DraftNode) => props.types[node.type]?.outputs?.length ? props.types[node.type].outputs : [{ key: 'main', label: '' }]
+/** A card is as big as its title needs, or the size the user gave it. */
+const sizeFor = (node: DraftNode): Size => sizeOf(node, outputsOf(node).length)
 const portOf = (node: DraftNode, handle: string) => {
   const outs = outputsOf(node)
-  return outputPort(node.position, Math.max(0, outs.findIndex((o) => o.key === handle)), outs.length)
+  return outputPort(node.position, Math.max(0, outs.findIndex((o) => o.key === handle)), outs.length, sizeFor(node))
 }
 
-const paths = computed(() =>
-  props.edges.flatMap((e) => {
+const loops = computed(() => findLoops({ nodes: props.nodes, edges: props.edges }))
+interface DrawnEdge {
+  id: string
+  d: string
+  loop: boolean
+  label: Point | null
+}
+const paths = computed<DrawnEdge[]>(() => {
+  let lane = 0
+  return props.edges.flatMap((e): DrawnEdge[] => {
     const s = byId.value.get(e.source)
     const t = byId.value.get(e.target)
-    return s && t ? [{ id: e.id, d: edgePath(portOf(s, e.sourceHandle ?? 'main'), inputPort(t.position)) }] : []
-  }),
-)
+    if (!s || !t) return []
+    const from = portOf(s, e.sourceHandle ?? 'main')
+    const to = inputPort(t.position, sizeFor(t))
+    if (loops.value.backEdgeIds.has(e.id)) {
+      // a loop-back goes under the cards: below the lowest edge of the two cards it joins
+      const bottom = Math.max(s.position.y + sizeFor(s).h, t.position.y + sizeFor(t).h)
+      const l = lane++
+      const y = bottom + 34 + l * 16
+      return [{ id: e.id, d: loopEdgePath(from, to, bottom, l), loop: true, label: { x: (from.x + to.x) / 2, y: y - 6 } }]
+    }
+    return [{ id: e.id, d: edgePath(from, to), loop: false, label: null }]
+  })
+})
 const linkPath = computed(() => {
   const l = link.value
   const s = l && byId.value.get(l.source)
@@ -115,6 +143,22 @@ function onOutputDown(e: PointerEvent, node: DraftNode, handle: string) {
   )
 }
 
+/** Drag the bottom-right corner to give a card a size of its own; double-click it to let the card fit its title again. */
+function onResizeDown(e: PointerEvent, node: DraftNode) {
+  emit('select', { kind: 'node', id: node.id })
+  const start = { x: e.clientX, y: e.clientY, size: sizeFor(node) }
+  gesture(
+    (m) =>
+      emit(
+        'resize',
+        node.id,
+        Math.round(Math.min(MAX_MANUAL.w, Math.max(MIN_MANUAL.w, start.size.w + (m.clientX - start.x) / view.k))),
+        Math.round(Math.min(MAX_MANUAL.h, Math.max(MIN_MANUAL.h, start.size.h + (m.clientY - start.y) / view.k))),
+      ),
+    () => {},
+  )
+}
+
 function onWheel(e: WheelEvent) {
   if (e.ctrlKey || e.metaKey) {
     const r = el.value!.getBoundingClientRect()
@@ -171,8 +215,9 @@ function nodeClass(node: DraftNode) {
   >
     <div class="pointer-events-none absolute left-0 top-0 origin-top-left" data-testid="canvas-layer" :style="{ transform: `translate(${view.x}px, ${view.y}px) scale(${view.k})` }">
       <svg class="absolute left-0 top-0 overflow-visible" width="1" height="1" data-testid="canvas-edges">
-        <g v-for="p in paths" :key="p.id" :data-testid="`edge-${p.id}`">
-          <path :d="p.d" fill="none" stroke="var(--ink)" :stroke-width="selection?.kind === 'edge' && selection.id === p.id ? 3 : 1.5" stroke-linecap="round" />
+        <g v-for="p in paths" :key="p.id" :data-testid="`edge-${p.id}`" :data-loop="p.loop ? 'true' : undefined">
+          <path :d="p.d" fill="none" stroke="var(--ink)" :stroke-width="selection?.kind === 'edge' && selection.id === p.id ? 3 : 1.5" :stroke-dasharray="p.loop ? '7 5' : undefined" stroke-linecap="round" />
+          <text v-if="p.label" :x="p.label.x" :y="p.label.y" text-anchor="middle" font-size="10" font-weight="600" fill="var(--ink-soft)" class="pointer-events-none select-none" data-testid="loop-label">loop</text>
           <path :d="p.d" fill="none" stroke="transparent" stroke-width="16" style="pointer-events: stroke; cursor: pointer" @pointerdown.stop="emit('select', { kind: 'edge', id: p.id })" />
         </g>
         <path v-if="linkPath" :d="linkPath" fill="none" stroke="var(--ink)" stroke-width="1.5" stroke-dasharray="5 4" />
@@ -188,9 +233,11 @@ function nodeClass(node: DraftNode) {
         role="group"
         :aria-label="node.name"
         :title="`${node.name} (${types[node.type]?.name ?? node.type})`"
-        class="pointer-events-auto absolute flex cursor-grab items-center gap-2.5 rounded-card bg-surface px-3 active:cursor-grabbing"
-        :class="nodeClass(node)"
-        :style="{ left: `${node.position.x}px`, top: `${node.position.y}px`, width: `${NODE_W}px`, height: `${NODE_H}px` }"
+        class="group pointer-events-auto absolute flex cursor-grab items-center gap-2.5 rounded-card bg-surface pl-3 active:cursor-grabbing"
+        :class="[nodeClass(node), outputsOf(node).length > 1 ? 'pr-12' : 'pr-3']" 
+        :style="{ left: `${node.position.x}px`, top: `${node.position.y}px`, width: `${sizeFor(node).w}px`, height: `${sizeFor(node).h}px` }"
+        :data-size="`${sizeFor(node).w}x${sizeFor(node).h}`"
+        :data-manual-size="node.size ? 'true' : undefined"
         @pointerdown.stop="onNodeDown($event, node)"
       >
         <span
@@ -203,14 +250,19 @@ function nodeClass(node: DraftNode) {
           <AppIcon :name="iconFor(node.type)" :size="16" />
         </span>
         <span class="min-w-0 flex-1">
-          <span class="block truncate text-xs font-semibold" data-testid="node-name">{{ node.name }}</span>
+          <span
+            class="block break-words text-xs font-semibold leading-4"
+            :style="{ display: '-webkit-box', WebkitBoxOrient: 'vertical', WebkitLineClamp: titleLines(sizeFor(node).h), overflow: 'hidden' }"
+            data-testid="node-name"
+          >{{ node.name }}</span>
           <span class="block truncate text-[10px] text-muted">{{ types[node.type]?.name ?? node.type }}</span>
         </span>
+        <span v-if="(rounds?.[node.id] ?? 1) > 1" class="shrink-0 rounded border border-line-strong px-1 text-[10px] font-semibold" :title="`Ran ${rounds![node.id]} times in this run (a loop)`" data-testid="node-rounds">×{{ rounds![node.id] }}</span>
         <AppIcon
           v-if="states[node.id] && states[node.id] !== 'pending'"
           :name="nodeStatusIcon[states[node.id]!]"
           :size="15"
-          :class="[states[node.id] === 'running' ? 'animate-spin' : '', outputsOf(node).length > 1 ? 'mr-9' : '']"
+          :class="states[node.id] === 'running' ? 'animate-spin' : ''"
           :title="statusLabel(states[node.id]!)"
           data-testid="node-status"
         />
@@ -232,6 +284,17 @@ function nodeClass(node: DraftNode) {
             @pointerdown.stop.prevent="onOutputDown($event, node, o.key)"
           />
         </template>
+        <span
+          class="absolute bottom-0.5 right-0.5 inline-flex h-3.5 w-3.5 cursor-nwse-resize items-center justify-center rounded-sm text-muted transition-opacity group-hover:opacity-100"
+          :class="selection?.kind === 'node' && selection.id === node.id ? 'opacity-100' : 'opacity-0'"
+          title="Drag to resize. Double-click to fit the title again."
+          data-icon-exempt="resize handle, not a button"
+          :data-testid="`resize-${node.id}`"
+          @pointerdown.stop.prevent="onResizeDown($event, node)"
+          @dblclick.stop="emit('fit', node.id)"
+        >
+          <AppIcon name="resize" :size="10" />
+        </span>
       </div>
     </div>
 

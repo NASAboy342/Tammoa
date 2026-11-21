@@ -69,12 +69,12 @@ test.describe('long text is never silently cut off', () => {
   // names are limited to 100 characters, so this is as long as the app allows
   const LONG = 'Weekly report for the whole engineering organisation, all contractors and partner teams '.repeat(2).slice(0, 99).trim()
 
-  test('a long card name shows in full on hover (tooltip) and in the inspector', async ({ page, request }) => {
+  test('a long card name shows in full on the card (it grows), on hover and in the inspector', async ({ page, request }) => {
     const flow = await makeFlow(request, [card('t', 'trigger.manual', {}, 0, 0, LONG)])
     await open(page, flow.id)
     await expect(node(page, 't')).toHaveAttribute('title', `${LONG} (Manual trigger)`)
     const nameEl = node(page, 't').getByTestId('node-name')
-    expect(await nameEl.evaluate((e) => e.scrollWidth > e.clientWidth)).toBe(true) // really truncated on the card…
+    expect(await nameEl.evaluate((e) => e.scrollWidth <= e.clientWidth + 1)).toBe(true) // the card grows to hold the whole title…
     await node(page, 't').click()
     await expect(page.getByTestId('inspector-name')).toHaveValue(LONG) // …and complete where it is edited
   })

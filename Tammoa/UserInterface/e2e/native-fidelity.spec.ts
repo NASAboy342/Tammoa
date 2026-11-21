@@ -1,5 +1,5 @@
 import { expect, test, type Page } from '@playwright/test'
-import { card, edge, makeFlow, node, open, setCode, trigger } from './helpers'
+import { drag, card, edge, makeFlow, node, open, setCode, trigger } from './helpers'
 import { startFakeOllama } from './fake-ollama'
 
 /**
@@ -144,6 +144,35 @@ test('the Data card: stored-text editor, saving, and a run that writes it, rende
   await page.getByTestId('run').click()
   await expect(page.getByTestId('stored-editor').locator('.cm-content')).toContainText('written-by-run') // pushed to the open editor
   await page.screenshot({ path: 'test-results/webkit-data-card.png' })
+})
+
+test('cards grow to hold their title, resize by hand, and a loop-back is drawn dashed with rounds to browse, in WebKit', async ({ page, request }) => {
+  const long = 'A card with a really rather long title to show'
+  const flow = await makeFlow(request, [trigger(), card('a', 'script.shell', { command: 'echo a' }, 260, 0, long), card('b', 'script.shell', { command: 'echo b' }, 300, 160, 'B')], [edge('t', 'a'), edge('a', 'b')])
+  await open(page, flow.id)
+  const box = await node(page, 'a').boundingBox()
+  expect(box!.width).toBeGreaterThan(208)
+  const handle = page.getByTestId('resize-a')
+  const h = await handle.boundingBox()
+  const cx = h!.x + h!.width / 2
+  const cy = h!.y + h!.height / 2
+  await page.mouse.move(cx, cy)
+  await page.mouse.down()
+  await page.mouse.move(cx + 120, cy + 50, { steps: 8 })
+  await page.mouse.up()
+  expect((await node(page, 'a').boundingBox())!.width).toBeGreaterThan(box!.width + 40)
+  await drag(page, node(page, 'b').locator('[data-handle="out"]'), node(page, 'a'))
+  const loop = page.locator('[data-loop="true"] path[stroke-dasharray]').first()
+  await expect(loop).toBeVisible()
+  await page.getByTestId('loop-limit').fill('3')
+  await page.getByTestId('edit-save').click()
+  await expect(page.getByTestId('edit-saved')).toBeVisible()
+  await page.getByTestId('run').click()
+  await expect(page.locator('[data-testid^="run-row-"]').first()).toHaveAttribute('data-status', 'failed')
+  await node(page, 'a').click()
+  await page.getByTestId('inspector-tab-output').click()
+  await expect(page.getByTestId('round-picker')).toBeVisible()
+  await page.screenshot({ path: 'test-results/webkit-loop.png' })
 })
 
 test('live run state arrives over server-sent events in WebKit', async ({ page, request }) => {

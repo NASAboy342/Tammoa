@@ -8,7 +8,7 @@
  *  Guide:    the card's tutorial with examples you can apply
  * The status and error of the last run stay visible above the tabs.
  */
-import { computed } from 'vue'
+import { computed, ref } from 'vue'
 import AppIcon from '@/components/icons/AppIcon.vue'
 import type { IconName } from '@/components/icons/icons'
 import type { CardTypeInfo, GuideExample } from '@/services/cardApi'
@@ -17,7 +17,7 @@ import type { DraftNode } from '@/helpers/flowDraft'
 import { defaultParams } from '@/helpers/flowDraft'
 import { formatWhen } from '@/helpers/flowHelpers'
 import { tpl } from '@/helpers/fields'
-import { formatDuration, nodeStatusIcon, statusLabel, type NodeRunPick } from '@/helpers/runHelpers'
+import { formatDuration, nodeStatusIcon, roundsOf, statusLabel, type NodeRunPick } from '@/helpers/runHelpers'
 import IconField from '@/components/forms/IconField.vue'
 import ExpandableText from '@/components/ExpandableText.vue'
 import ParamField from './ParamField.vue'
@@ -25,6 +25,7 @@ import DataView from './DataView.vue'
 import FieldExplorer from './FieldExplorer.vue'
 import GuidePanel from './GuidePanel.vue'
 import LiveOutput from './LiveOutput.vue'
+import RoundPicker from './RoundPicker.vue'
 import DataCardsPanel from './DataCardsPanel.vue'
 
 export type InspectorTab = 'settings' | 'input' | 'output' | 'guide'
@@ -54,8 +55,13 @@ const emit = defineEmits<{ rename: [name: string]; param: [key: string, value: u
 const values = computed(() => ({ ...(props.info ? defaultParams(props.info) : {}), ...props.node.params }))
 
 const isTrigger = computed(() => !!props.info?.isTrigger)
-const realInput = computed(() => props.data?.nodeRun.input)
-const realOutput = computed(() => props.data?.nodeRun.output)
+// a card that ran several times (a loop) can be looked at round by round; null = follow the newest round
+const chosenRound = ref<number | null>(null)
+const rounds = computed(() => (props.data ? roundsOf(props.data.nodeRun) : []))
+const shownRound = computed(() => (chosenRound.value === null ? rounds.value.at(-1) : rounds.value.find((r) => r.iteration === chosenRound.value) ?? rounds.value.at(-1)))
+const realInput = computed(() => shownRound.value?.input)
+const realOutput = computed(() => shownRound.value?.output)
+const roundError = computed(() => (shownRound.value && !shownRound.value.current ? shownRound.value.error : undefined))
 const dataNote = computed(() => (props.data ? `${props.data.fromActive ? 'From the selected run' : 'From an earlier run (this card did not run in the selected one)'}, ${formatWhen(props.data.run.startedAt)}` : ''))
 const exampleOutput = (info?: CardTypeInfo) => info?.guide?.outputExample
 
@@ -133,6 +139,7 @@ const hasData = (id: InspectorTab) => (id === 'input' ? realInput.value !== unde
       <section v-if="!isTrigger" data-testid="input-previous">
         <h3 class="mb-1 flex items-center gap-1.5 text-[11px] font-semibold uppercase tracking-widest text-muted"><AppIcon name="arrow-down" :size="12" /> Input from the previous card</h3>
         <template v-if="realInput !== undefined">
+          <RoundPicker v-model="chosenRound" :rounds="rounds" class="mb-1.5" />
           <p class="mb-1.5 text-[11px] text-muted" data-testid="input-source">{{ dataNote }}. Copy a reference and paste it into a setting.</p>
           <DataView :value="realInput" root="input" title="Input" testid="input-data" />
         </template>
@@ -171,6 +178,8 @@ const hasData = (id: InspectorTab) => (id === 'input' ? realInput.value !== unde
 
     <!-- OUTPUT -->
     <div v-else-if="tab === 'output'" class="space-y-3" role="tabpanel" data-testid="inspector-output-panel">
+      <RoundPicker v-model="chosenRound" :rounds="rounds" />
+      <p v-if="roundError" class="flex items-start gap-1.5 text-xs font-semibold" data-testid="round-error"><AppIcon name="alert" :size="13" class="mt-0.5 shrink-0" /> This round failed: {{ roundError }}</p>
       <template v-if="realOutput !== undefined">
         <p class="text-[11px] text-muted" data-testid="output-source">{{ dataNote }}. The card after this one receives this as its input: copy a reference to use a field.</p>
         <DataView :value="realOutput" root="input" title="Output" testid="output-data" />

@@ -14,6 +14,20 @@ export interface NodeRun {
   input?: unknown
   /** What a RUNNING card has produced so far (e.g. the answer an AI model is still writing). Gone when the card finishes. */
   live?: LiveOutput
+  /** Which round of a loop this is (1 for a card that ran once). */
+  iteration?: number
+  /** Earlier rounds of a loop (the newest 10), oldest first. */
+  previous?: NodeIteration[]
+}
+
+export interface NodeIteration {
+  iteration: number
+  status: NodeRunStatus
+  startedAt?: string
+  finishedAt?: string
+  input?: unknown
+  output?: unknown
+  error?: string
 }
 
 export interface LiveOutput {

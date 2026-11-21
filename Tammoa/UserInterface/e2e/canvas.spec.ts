@@ -46,16 +46,16 @@ test.describe('building a flow on the canvas', () => {
     await expect(page.getByTestId('param-input-timeoutSeconds')).toHaveValue('12')
   })
 
-  test('connection rules: no self links, no loops (with an explanation)', async ({ page, request }) => {
+  test('connection rules: no self links and nothing into a trigger (a connection back to an earlier card is a loop and is allowed)', async ({ page, request }) => {
     const flow = await makeFlow(request, [trigger(), script('a', 'echo a'), script('b', 'echo b', 560)], [edge('t', 'a'), edge('a', 'b')])
     await open(page, flow.id)
     await drag(page, node(page, 'a').locator('[data-handle="out"]'), node(page, 'a'))
     await expect(page.locator('[data-testid^="edge-e-"]')).toHaveCount(2)
-    await drag(page, node(page, 'b').locator('[data-handle="out"]'), node(page, 'a'))
-    await expect(page.getByTestId('canvas-notice')).toContainText('loop')
-    await expect(page.locator('[data-testid^="edge-e-"]')).toHaveCount(2)
     await drag(page, node(page, 'a').locator('[data-handle="out"]'), node(page, 't'))
     await expect(page.locator('[data-testid^="edge-e-"]')).toHaveCount(2) // a trigger has no input
+    await drag(page, node(page, 'b').locator('[data-handle="out"]'), node(page, 'a'))
+    await expect(page.locator('[data-testid^="edge-e-"]')).toHaveCount(3) // b -> a goes back: a loop
+    await expect(page.getByTestId('canvas-notice')).toContainText('Loop created')
   })
 
   test('delete a card with the key and a connection with the button', async ({ page, request }) => {
@@ -217,7 +217,6 @@ test.describe('backend contract', () => {
     const put = (definition: unknown) => request.put(`/api/flows/${flow.id}`, { data: { name: flow.name, description: '', definition } })
     for (const [definition, reason] of [
       [{ nodes: [{ id: 'x', type: 'ghost' }], edges: [] }, /Unknown card type/],
-      [{ nodes: [script('a', 'x'), script('b', 'x')], edges: [edge('a', 'b'), edge('b', 'a')] }, /Loops/],
       [{ nodes: [script('a', 'x')], edges: [edge('a', 'nope')] }, /does not exist/],
       [{ nodes: [trigger(), trigger()], edges: [] }, /Duplicate/],
     ] as const) {

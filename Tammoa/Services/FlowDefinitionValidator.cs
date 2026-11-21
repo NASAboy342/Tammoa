@@ -7,6 +7,12 @@ public class FlowDefinitionValidator : IFlowDefinitionValidator
     public const int MaxNodes = 200;
     public const int MaxIdLength = 64;
     public const int MaxNameLength = 100;
+    public const int MinLoopLimit = 1;
+    public const int MaxLoopLimit = 1000;
+    public const int MinCardSize = 40;
+    public const int MaxCardSize = 1600;
+
+    private static bool IsNumberIn(JToken? t, int min, int max) => t?.Type is JTokenType.Integer or JTokenType.Float && (double)t >= min && (double)t <= max;
 
     private readonly ICardRegistry _cards;
 
@@ -47,6 +53,9 @@ public class FlowDefinitionValidator : IFlowDefinitionValidator
                 throw new ArgumentException($"A card name must be text of at most {MaxNameLength} characters.");
             if (node["params"] is { Type: not JTokenType.Null } p && p is not JObject)
                 throw new ArgumentException($"Card '{id}': params must be an object.");
+            if (node["size"] is { Type: not JTokenType.Null } size &&
+                !(size is JObject sz && IsNumberIn(sz["w"], MinCardSize, MaxCardSize) && IsNumberIn(sz["h"], MinCardSize, MaxCardSize)))
+                throw new ArgumentException($"Card '{id}': size must be {{ w, h }} numbers from {MinCardSize} to {MaxCardSize}.");
             if (node["position"] is { Type: not JTokenType.Null } pos &&
                 !(pos is JObject po && po["x"]?.Type is JTokenType.Integer or JTokenType.Float && po["y"]?.Type is JTokenType.Integer or JTokenType.Float))
                 throw new ArgumentException($"Card '{id}': position must be {{ x, y }} numbers.");
@@ -64,7 +73,6 @@ public class FlowDefinitionValidator : IFlowDefinitionValidator
         }
 
         var links = new HashSet<(string, string, string)>();
-        var children = ids.ToDictionary(i => i, _ => new List<string>());
         foreach (var token in edges)
         {
             if (token is not JObject edge) throw new ArgumentException("Every connection must be an object.");
@@ -76,24 +84,16 @@ public class FlowDefinitionValidator : IFlowDefinitionValidator
             if (!handles[source].Contains(handle)) throw new ArgumentException($"A connection starts from an output ('{handle}') that card '{source}' does not have.");
             if (!links.Add((source, handle, target))) throw new ArgumentException("Two cards are connected twice.");
             if (triggers.Contains(target)) throw new ArgumentException("A trigger card cannot have an incoming connection.");
-            children[source].Add(target);
         }
 
-        // TODO(loop card): cycles are rejected until the loop card defines how repetition works.
-        if (HasCycle(children)) throw new ArgumentException("Loops are not supported yet: the connections form a cycle.");
-    }
-
-    private static bool HasCycle(Dictionary<string, List<string>> children)
-    {
-        var state = new Dictionary<string, int>(); // 1 = visiting, 2 = done
-        bool Visit(string id)
+        // A connection may go back to an earlier card: that is a loop (see LoopAnalysis). The engine ends a loop that never ends
+        // with the loop limit, so there is nothing more to check here.
+        if (definition["settings"] is { Type: not JTokenType.Null } settings)
         {
-            if (state.TryGetValue(id, out var s)) return s == 1;
-            state[id] = 1;
-            foreach (var c in children[id]) if (Visit(c)) return true;
-            state[id] = 2;
-            return false;
+            if (settings is not JObject so) throw new ArgumentException("definition.settings must be an object.");
+            if (so["loopLimit"] is { Type: not JTokenType.Null } limit &&
+                !(limit.Type == JTokenType.Integer && (long)limit is >= MinLoopLimit and <= MaxLoopLimit))
+                throw new ArgumentException($"The loop limit must be a whole number from {MinLoopLimit} to {MaxLoopLimit}.");
         }
-        return children.Keys.Any(Visit);
     }
 }

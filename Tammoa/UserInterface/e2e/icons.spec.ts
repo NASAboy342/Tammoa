@@ -1,5 +1,5 @@
 import { expect, test, type Page } from '@playwright/test'
-import { openTab, setCode, showJson } from './helpers'
+import { drag, edge, makeFlow, node, openTab, runAndWait, script, setCode, showJson, trigger } from './helpers'
 import { startFakeOllama } from './fake-ollama'
 
 /**
@@ -219,6 +219,26 @@ test('live AI output and the Data card (stored text, data list, change notice): 
   } finally {
     await fake.close()
   }
+})
+
+test('a loop: loop-back line, the loop limit field, the round picker and the resize handle all pass the icon audit', async ({ page, request }) => {
+  const flow = await makeFlow(request, [trigger(), script('a', 'echo a', 260), script('b', 'echo b', 520)], [edge('t', 'a'), edge('a', 'b')])
+  await page.goto(`/#/flows/${flow.id}`)
+  await expect(node(page, 'b')).toBeVisible()
+  await drag(page, node(page, 'b').locator('[data-handle="out"]'), node(page, 'a'))
+  await expect(page.getByTestId('loop-limit')).toBeVisible()
+  expect(await withoutIcon(page), 'canvas with a loop-back, the loop limit field and hint, resize handles').toEqual([])
+  expect(await page.getByTestId('loop-limit').locator('xpath=..').locator('svg[data-icon]').count(), 'loop-limit leading icon').toBeGreaterThanOrEqual(1)
+  await page.getByTestId('loop-limit').fill('3')
+  await page.getByTestId('edit-save').click()
+  await expect(page.getByTestId('edit-saved')).toBeVisible()
+  await page.getByTestId('run').click()
+  await expect(page.locator('[data-testid^="run-row-"]').first()).toHaveAttribute('data-status', 'failed')
+  await node(page, 'a').click()
+  await openTab(page, 'output')
+  await expect(page.getByTestId('round-picker')).toBeVisible()
+  expect(await withoutIcon(page), 'round picker (earlier / later round)').toEqual([])
+  void runAndWait
 })
 
 test('connections page and its dialogs: every clickable has an icon, every field a leading icon', async ({ page, request }) => {

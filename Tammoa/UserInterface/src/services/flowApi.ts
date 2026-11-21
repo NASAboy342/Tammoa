@@ -4,6 +4,7 @@ export interface FlowDefinition {
   schemaVersion?: number
   nodes?: unknown[]
   edges?: unknown[]
+  settings?: { loopLimit?: number; [key: string]: unknown }
   [key: string]: unknown
 }
 

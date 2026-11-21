@@ -61,6 +61,26 @@ export function pickNodeRun(runs: FlowRun[], activeId: string | null, nodeId: st
   return null
 }
 
+/** One round of a card: what it received, produced, and how it ended (the current round is the last). */
+export interface Round {
+  iteration: number
+  status: NodeRunStatus
+  startedAt?: string
+  finishedAt?: string
+  input?: unknown
+  output?: unknown
+  error?: string
+  /** True for the card's current round (earlier rounds are history). */
+  current: boolean
+}
+
+/** All rounds of a card in a run, oldest first: the kept earlier ones, then the current one. A card that ran once has one round. */
+export function roundsOf(node: NodeRun): Round[] {
+  const earlier: Round[] = (node.previous ?? []).map((p) => ({ ...p, current: false }))
+  const current: Round = { iteration: node.iteration ?? 1, status: node.status, startedAt: node.startedAt, finishedAt: node.finishedAt, input: node.input, output: node.output, error: node.error, current: true }
+  return [...earlier, current]
+}
+
 export function prettyOutput(value: unknown, max = 4000): string {
   const text = typeof value === 'string' ? value : JSON.stringify(value, null, 2) ?? ''
   return text.length > max ? `${text.slice(0, max)}\n… (${text.length - max} more characters)` : text

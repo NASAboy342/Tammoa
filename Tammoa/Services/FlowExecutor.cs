@@ -9,6 +9,9 @@ public class FlowExecutor : IFlowExecutor
     /// <summary>At most one "live" update per card per interval (what a running card has produced so far).</summary>
     public static readonly TimeSpan LiveInterval = TimeSpan.FromMilliseconds(150);
 
+    /// <summary>How many times one card may run in one run before the engine stops a loop that never ends (per flow: settings.loopLimit).</summary>
+    public const int DefaultLoopLimit = 50;
+
     private readonly ICardRegistry _cards;
     private readonly TimeProvider _time;
     private readonly IDataService _data;
@@ -27,6 +30,18 @@ public class FlowExecutor : IFlowExecutor
             .Select(e => (Source: (string)e["source"]!, Handle: (string?)e["sourceHandle"] ?? "main", Target: (string)e["target"]!)).ToList();
         var incoming = nodes.Keys.ToDictionary(k => k, k => edges.Where(e => e.Target == k).ToList());
 
+        // ---- loops: a connection that goes back to an earlier card is a loop-back. Without the loop-backs the graph is a plain
+        // acyclic graph and the scheduling below works as it always did; a loop-back re-runs its target and the cards of that loop.
+        var loops = LoopAnalysis.Analyze(nodes.Keys.ToList(), edges.Select(e => (e.Source, e.Target)).ToList());
+        bool IsBack((string Source, string Handle, string Target) e) => loops.BackEdges.Contains((e.Source, e.Target));
+        var forwardIncoming = incoming.ToDictionary(k => k.Key, k => k.Value.Where(e => !IsBack(e)).ToList());
+        var backOut = nodes.Keys.ToDictionary(k => k, k => edges.Where(e => e.Source == k && IsBack(e)).ToList());
+        var loopLimit = (int?)(definition["settings"]?["loopLimit"]) is { } l and >= 1 ? Math.Min(l, 1000) : DefaultLoopLimit;
+        var visits = new Dictionary<string, int>();                      // how many times each card has started in this run
+        var history = new Dictionary<string, List<NodeIteration>>();     // earlier rounds of a card (newest NodeIteration.Max kept)
+        var retrigger = new Dictionary<string, List<JToken>>();          // loop-back targets waiting to run again, with their new input
+        var forced = new Dictionary<string, JToken?>();                  // a re-run card: starts with this input, whatever its other parents say
+
         var run = initial;
         var status = nodes.Keys.ToDictionary(k => k, _ => NodeRunStatus.Pending);
         var outputs = new Dictionary<string, JToken>();
@@ -38,6 +53,10 @@ public class FlowExecutor : IFlowExecutor
         // Everything that changes `run` or `status` happens under this lock, and onChange is called inside it so snapshots
         // reach the repository and the clients in revision order.
         var gate = new object();
+        NodeRun Make(string id, NodeRunStatus st, DateTimeOffset? started = null, DateTimeOffset? finished = null, JToken? output = null, string? error = null, JToken? input = null) =>
+            new(id, st, started, finished, output, error, input, Iteration: Math.Max(1, visits.GetValueOrDefault(id)),
+                Previous: history.TryGetValue(id, out var h) && h.Count > 0 ? h.ToList() : null);
+
         void Set(string id, NodeRun update)
         {
             lock (gate)
@@ -82,51 +101,108 @@ public class FlowExecutor : IFlowExecutor
         var startedAt = new Dictionary<string, DateTimeOffset>();
         var inputs = new Dictionary<string, JToken?>(); // what each started card received, kept in its NodeRun
 
+        static bool Terminal(NodeRunStatus st) => st is NodeRunStatus.Succeeded or NodeRunStatus.Failed or NodeRunStatus.Skipped or NodeRunStatus.Cancelled;
+        bool SameLoop(string a, string b) => loops.LoopOf.TryGetValue(a, out var la) && loops.LoopOf.TryGetValue(b, out var lb) && la == lb;
+        bool LoopAlive(string p) => loops.LoopOf.TryGetValue(p, out var l) && loops.LoopMembers[l].Any(m => status[m] is NodeRunStatus.Pending or NodeRunStatus.Running);
+        // a parent is settled when it has finished, and (if it is part of ANOTHER loop) that loop has stopped repeating:
+        // a card after a loop waits for the loop to end instead of being skipped on the first round
+        bool Settled(string parent, string node) => Terminal(status[parent]) && (SameLoop(parent, node) || !LoopAlive(parent));
+
+        void Archive(string id) // keep how a card ran in this round before the next round replaces it
+        {
+            NodeRun current;
+            lock (gate) current = run.Nodes.First(n => n.NodeId == id);
+            if (current.Status is not (NodeRunStatus.Succeeded or NodeRunStatus.Failed or NodeRunStatus.Cancelled)) return;
+            if (!history.TryGetValue(id, out var list)) history[id] = list = new List<NodeIteration>();
+            list.Add(new NodeIteration(current.Iteration, current.Status, current.StartedAt, current.FinishedAt, current.Input, current.Output, current.Error));
+            while (list.Count > NodeIteration.Max) list.RemoveAt(0);
+        }
+
         while (true)
         {
             bool changed;
             do
             {
                 changed = false;
+
+                // ---- loop-backs that fired: when no card of that loop is still running, start the next round
+                foreach (var target in retrigger.Keys.ToList())
+                {
+                    var region = loops.LoopMembers[loops.LoopOf[target]];
+                    if (region.Any(m => status[m] == NodeRunStatus.Running)) continue;
+                    var newInputs = retrigger[target];
+                    retrigger.Remove(target);
+                    if (ct.IsCancellationRequested || firstError is not null) continue;
+                    foreach (var m in region)
+                    {
+                        Archive(m);
+                        outputs.Remove(m);
+                        branches.Remove(m);
+                        pendingLive.Remove(m);
+                        lock (gate) lastLive.Remove(m);
+                        Set(m, Make(m, NodeRunStatus.Pending));
+                    }
+                    forced[target] = newInputs.Count == 1 ? newInputs[0] : new JArray(newInputs);
+                    changed = true;
+                }
+
                 foreach (var id in nodes.Keys.Where(k => status[k] == NodeRunStatus.Pending).ToList())
                 {
                     var card = _cards.Find((string)nodes[id]["type"]!);
-                    var inc = incoming[id];
+                    var inc = forwardIncoming[id];
                     var now = _time.GetUtcNow();
 
-                    if (ct.IsCancellationRequested) { Set(id, new NodeRun(id, NodeRunStatus.Cancelled, FinishedAt: now)); changed = true; continue; }
-                    if (firstError is not null) { Set(id, new NodeRun(id, NodeRunStatus.Skipped, FinishedAt: now)); changed = true; continue; }
+                    if (ct.IsCancellationRequested) { Set(id, Make(id, NodeRunStatus.Cancelled, finished: now)); changed = true; continue; }
+                    if (firstError is not null) { Set(id, Make(id, NodeRunStatus.Skipped, finished: now)); changed = true; continue; }
 
-                    List<(string Source, string Handle, string Target)> active;
-                    if (inc.Count == 0)
+                    JToken? input;
+                    if (forced.Remove(id, out var forcedInput))
                     {
-                        // a card with nothing connected runs only if it is a trigger, or a source (e.g. a Data card: it needs no trigger)
-                        if (card is null || !(card.Info.IsTrigger || card.Info.IsSource)) { Set(id, new NodeRun(id, NodeRunStatus.Skipped, FinishedAt: now)); changed = true; continue; }
-                        active = [];
+                        input = forcedInput; // a loop-back brought this card its new input; its other parents already ran
                     }
                     else
                     {
-                        // wait until every parent is finished, then run on the connections that are active:
-                        // the parent succeeded and (it is not a branching card, or it fired this connection's handle)
-                        if (inc.Any(e => status[e.Source] is NodeRunStatus.Pending or NodeRunStatus.Running)) continue;
-                        active = inc.Where(e => status[e.Source] == NodeRunStatus.Succeeded && (branches[e.Source] is null || branches[e.Source] == e.Handle)).ToList();
-                        if (active.Count == 0) { Set(id, new NodeRun(id, NodeRunStatus.Skipped, FinishedAt: now)); changed = true; continue; }
+                        List<(string Source, string Handle, string Target)> active;
+                        if (inc.Count == 0)
+                        {
+                            // a card with nothing connected runs only if it is a trigger, or a source (e.g. a Data card: it needs no trigger)
+                            if (card is null || !(card.Info.IsTrigger || card.Info.IsSource)) { Set(id, Make(id, NodeRunStatus.Skipped, finished: now)); changed = true; continue; }
+                            active = [];
+                        }
+                        else
+                        {
+                            // wait until every parent is settled, then run on the connections that are active:
+                            // the parent succeeded and (it is not a branching card, or it fired this connection's handle)
+                            if (inc.Any(e => !Settled(e.Source, id))) continue;
+                            active = inc.Where(e => status[e.Source] == NodeRunStatus.Succeeded && (branches[e.Source] is null || branches[e.Source] == e.Handle)).ToList();
+                            if (active.Count == 0) { Set(id, Make(id, NodeRunStatus.Skipped, finished: now)); changed = true; continue; }
+                        }
+                        input = active.Count == 0 ? null : active.Count == 1 ? outputs[active[0].Source] : new JArray(active.Select(e => outputs[e.Source]));
                     }
 
                     if (card is null)
                     {
-                        Set(id, new NodeRun(id, NodeRunStatus.Failed, now, now, Error: $"Unknown card type '{(string)nodes[id]["type"]!}'."));
+                        Set(id, Make(id, NodeRunStatus.Failed, now, now, error: $"Unknown card type '{(string)nodes[id]["type"]!}'."));
                         firstError ??= $"Unknown card type '{(string)nodes[id]["type"]!}'.";
                         changed = true;
                         continue;
                     }
 
-                    JToken? input = active.Count == 0 ? null : active.Count == 1 ? outputs[active[0].Source] : new JArray(active.Select(e => outputs[e.Source]));
                     var p = nodes[id]["params"] as JObject ?? new JObject();
                     var name = ((string?)nodes[id]["name"])?.Trim() is { Length: > 0 } n ? n : card.Info.Name;
+                    visits[id] = visits.GetValueOrDefault(id) + 1;
+                    if (visits[id] > loopLimit)
+                    {
+                        var message = $"Loop limit reached: '{name}' already ran {loopLimit} times in this run. A loop needs something that ends it (an IF card that sends the flow elsewhere), or raise the loop limit.";
+                        visits[id]--;   // the refused start is not a run: the card shows the rounds it really made
+                        Set(id, Make(id, NodeRunStatus.Failed, now, now, error: message));
+                        firstError ??= message;
+                        changed = true;
+                        continue;
+                    }
                     startedAt[id] = now;
                     inputs[id] = input;
-                    Set(id, new NodeRun(id, NodeRunStatus.Running, now, Input: input?.DeepClone()));
+                    Set(id, Make(id, NodeRunStatus.Running, now, input: input?.DeepClone()));
                     var cardInput = input?.DeepClone();
                     var cardRunInput = runInput?.DeepClone();
                     var cardParams = (JObject)p.DeepClone();
@@ -153,23 +229,30 @@ public class FlowExecutor : IFlowExecutor
                 var result = await done;
                 outputs[doneId] = result.Output;
                 branches[doneId] = result.Branch;
-                Set(doneId, new NodeRun(doneId, NodeRunStatus.Succeeded, startedAt[doneId], finished, result.Output, Input: inputs[doneId]?.DeepClone()));
+                Set(doneId, Make(doneId, NodeRunStatus.Succeeded, startedAt[doneId], finished, result.Output, input: inputs[doneId]?.DeepClone()));
+                // a connection that goes back to an earlier card: if it is active (this card is not branching, or fired that output),
+                // the earlier card will run again with this output as its input
+                foreach (var back in backOut[doneId].Where(b => result.Branch is null || result.Branch == b.Handle))
+                {
+                    if (!retrigger.TryGetValue(back.Target, out var waiting)) retrigger[back.Target] = waiting = new List<JToken>();
+                    waiting.Add(result.Output.DeepClone());
+                }
             }
             catch (OperationCanceledException) when (ct.IsCancellationRequested)
             {
-                Set(doneId, new NodeRun(doneId, NodeRunStatus.Cancelled, startedAt[doneId], finished, Input: inputs[doneId]?.DeepClone()));
+                Set(doneId, Make(doneId, NodeRunStatus.Cancelled, startedAt[doneId], finished, input: inputs[doneId]?.DeepClone()));
             }
             catch (Exception ex)
             {
                 if (ex is not (ArgumentException or InvalidOperationException)) Console.Error.WriteLine(ex);
-                Set(doneId, new NodeRun(doneId, NodeRunStatus.Failed, startedAt[doneId], finished, Error: ex.Message, Input: inputs[doneId]?.DeepClone()));
+                Set(doneId, Make(doneId, NodeRunStatus.Failed, startedAt[doneId], finished, error: ex.Message, input: inputs[doneId]?.DeepClone()));
                 firstError ??= ex.Message;
             }
         }
 
         // Anything still pending can only be a structural leftover; never leave a card Pending in a finished run.
         foreach (var id in status.Where(s => s.Value == NodeRunStatus.Pending).Select(s => s.Key).ToList())
-            Set(id, new NodeRun(id, NodeRunStatus.Skipped, FinishedAt: _time.GetUtcNow()));
+            Set(id, Make(id, NodeRunStatus.Skipped, finished: _time.GetUtcNow()));
 
         lock (gate)
         {

@@ -15,6 +15,7 @@ import { useCardTypeStore } from '@/stores/cardTypeStore'
 import { useRunStore } from '@/stores/runStore'
 import { canConnect, freeSpot, hasTrigger, makeNode, newId, removeEdge, removeNode, toDefinition, toDraft, type Draft } from '@/helpers/flowDraft'
 import { parseRunInput, pickNodeRun } from '@/helpers/runHelpers'
+import { findLoops, loopHasCondition } from '@/helpers/loops'
 import { SIDE_DEFAULT, SIDE_MAX, SIDE_MIN, clampSideWidth, widthAfterDrag } from '@/helpers/layout'
 
 const route = useRoute()
@@ -107,6 +108,23 @@ const nodeStates = computed(() => {
   for (const n of activeRun.value?.nodes ?? []) states[n.nodeId] = n.status
   return states
 })
+// how many times each card ran in the shown run (a card in a loop runs several times)
+const rounds = computed(() => {
+  const r: Record<string, number> = {}
+  for (const n of activeRun.value?.nodes ?? []) if ((n.iteration ?? 1) > 1) r[n.nodeId] = n.iteration!
+  return r
+})
+// loops in the drawn flow: the limit field only shows when there is one, and a loop with nothing to end it gets a hint
+const loops = computed(() => findLoops(draft))
+const loopsWithoutCondition = computed(() => loops.value.loops.filter((l) => !loopHasCondition(l, draft, cards.byType)))
+const loopLimit = computed({
+  get: () => draft.loopLimit ?? '',
+  set: (v: number | string) => {
+    const n = typeof v === 'number' ? v : Number(v)
+    draft.loopLimit = v === '' || !Number.isFinite(n) ? undefined : Math.min(1000, Math.max(1, Math.round(n)))
+  },
+})
+
 const selectedNode = computed(() => (selection.value?.kind === 'node' ? draft.nodes.find((n) => n.id === selection.value!.id) ?? null : null))
 const selectedNodeRun = computed(() => activeRun.value?.nodes.find((n) => n.nodeId === selectedNode.value?.id))
 // the data tabs show the selected run's data for this card, or else the newest run in which it actually ran
@@ -138,6 +156,7 @@ function adopt(f: Flow) {
   const d = toDraft(f.definition)
   draft.nodes = d.nodes
   draft.edges = d.edges
+  draft.loopLimit = d.loopLimit // the flow's loop limit travels with the draft (undefined = the engine's default)
   savedSnapshot.value = snapshot()
   if (selection.value && !draft.nodes.some((n) => n.id === selection.value!.id) && !draft.edges.some((e) => e.id === selection.value!.id)) selection.value = null
 }
@@ -174,6 +193,15 @@ function addCard(type: string) {
   selection.value = { kind: 'node', id: node.id }
 }
 
+function resizeNode(nodeId: string, w: number, h: number) {
+  const n = draft.nodes.find((i) => i.id === nodeId)
+  if (n) n.size = { w, h }
+}
+function fitNode(nodeId: string) {
+  const n = draft.nodes.find((i) => i.id === nodeId)
+  if (n) delete n.size // back to "as big as the title needs"
+}
+
 function moveNode(nodeId: string, x: number, y: number) {
   const n = draft.nodes.find((i) => i.id === nodeId)
   if (n) n.position = { x, y }
@@ -182,7 +210,16 @@ function moveNode(nodeId: string, x: number, y: number) {
 function connect(source: string, target: string, handle: string) {
   const result = canConnect(draft, cards.byType, source, target, handle)
   if (!result.ok) return say(result.reason)
-  draft.edges.push({ id: newId('e'), source, sourceHandle: handle, target })
+  const edge = { id: newId('e'), source, sourceHandle: handle, target }
+  draft.edges.push(edge)
+  if (findLoops(draft).backEdgeIds.has(edge.id)) {
+    const loop = findLoops(draft).loops.find((l) => l.includes(source) && l.includes(target)) ?? []
+    say(
+      loopHasCondition(loop, draft, cards.byType)
+        ? 'Loop created: the earlier card runs again with this card\'s output, until the IF sends the flow the other way.'
+        : 'Loop created, but nothing in it decides when to stop: it will repeat until the loop limit. Add an IF card to end it.',
+    )
+  }
   selection.value = { kind: 'edge', id: draft.edges[draft.edges.length - 1].id }
 }
 
@@ -295,6 +332,11 @@ const inputCls =
 
         <div class="flex flex-wrap items-center gap-2">
           <CardPalette :types="cards.types" :icon-for="cards.iconFor" :loading="cards.loading" @add="addCard" />
+          <span v-if="loops.loops.length" class="relative block w-36" title="How many times one card may run in one run. A loop that never ends stops here.">
+            <AppIcon name="refresh" :size="14" class="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-muted" />
+            <input v-model="loopLimit" type="number" min="1" max="1000" aria-label="Loop limit" placeholder="Loop limit (50)" :class="inputCls" data-testid="loop-limit" />
+          </span>
+          <p v-if="loopsWithoutCondition.length" class="flex min-w-0 items-center gap-1.5 text-xs font-semibold" data-testid="loop-hint"><AppIcon name="alert" :size="13" class="shrink-0" /> A loop has no IF to end it: it repeats until the loop limit.</p>
           <span class="flex-1" />
           <span class="relative block w-56">
             <AppIcon name="zap" :size="15" class="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-muted" />
@@ -320,7 +362,10 @@ const inputCls =
             :icon-for="cards.iconFor"
             :states="nodeStates"
             :selection="selection"
+            :rounds="rounds"
             @move="moveNode"
+            @resize="resizeNode"
+            @fit="fitNode"
             @select="selection = $event"
             @connect="connect"
             @remove="removeSelection"

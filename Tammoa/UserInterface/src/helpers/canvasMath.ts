@@ -26,8 +26,26 @@ export function zoomAt(v: View, factor: number, anchor: Point): View {
 }
 
 /** Output handle `index` of `count`, spread evenly down the right edge (one handle = the middle). */
-export const outputPort = (n: Point, index = 0, count = 1): Point => ({ x: n.x + NODE_W, y: n.y + (NODE_H * (index + 1)) / (count + 1) })
-export const inputPort = (n: Point): Point => ({ x: n.x, y: n.y + NODE_H / 2 })
+export interface Size {
+  w: number
+  h: number
+}
+export const DEFAULT_SIZE: Size = { w: NODE_W, h: NODE_H }
+
+export const outputPort = (n: Point, index = 0, count = 1, size: Size = DEFAULT_SIZE): Point => ({ x: n.x + size.w, y: n.y + (size.h * (index + 1)) / (count + 1) })
+export const inputPort = (n: Point, size: Size = DEFAULT_SIZE): Point => ({ x: n.x, y: n.y + size.h / 2 })
+
+/**
+ * A loop-back goes from the right of a later card, down under the cards and back up into the left of an earlier one,
+ * so it can never be mistaken for a forward line. `bottom` is the y (world) of the lowest edge of the cards involved;
+ * `lane` spreads several loop-backs so they do not overlap.
+ */
+export function loopEdgePath(a: Point, b: Point, bottom: number, lane = 0): string {
+  const y = bottom + 34 + lane * 16
+  const reach = 56
+  const mid = (a.x + b.x) / 2
+  return `M ${a.x} ${a.y} C ${a.x + reach} ${a.y}, ${a.x + reach} ${y}, ${mid} ${y} C ${b.x - reach} ${y}, ${b.x - reach} ${b.y}, ${b.x} ${b.y}`
+}
 
 /** Cubic bezier from an output port to an input port; the pull grows with distance so back-links stay readable. */
 export function edgePath(a: Point, b: Point): string {

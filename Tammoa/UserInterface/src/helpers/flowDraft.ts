@@ -1,6 +1,6 @@
 import type { CardTypeInfo } from '@/services/cardApi'
 import type { FlowDefinition } from '@/services/flowApi'
-import { NODE_H, NODE_W } from './canvasMath'
+import { NODE_H, NODE_W, type Size } from './canvasMath'
 
 /** The editable copy of a flow's cards and connections. Pure functions: the canvas view owns the state. */
 export interface DraftNode {
@@ -8,6 +8,8 @@ export interface DraftNode {
   type: string
   name: string
   position: { x: number; y: number }
+  /** Only when the user dragged the card to a size; otherwise it is as big as its title needs. */
+  size?: Size
   params: Record<string, unknown>
 }
 export interface DraftEdge {
@@ -20,6 +22,8 @@ export interface DraftEdge {
 export interface Draft {
   nodes: DraftNode[]
   edges: DraftEdge[]
+  /** How often one card may run in one run (flow setting); undefined = the engine's default (50). */
+  loopLimit?: number
 }
 
 export function newId(prefix: string): string {
@@ -36,15 +40,23 @@ export function toDraft(def: FlowDefinition | undefined): Draft {
       type: String(n.type),
       name: typeof n.name === 'string' ? n.name : String(n.type),
       position: { x: Number(n.position?.x ?? 0), y: Number(n.position?.y ?? 0) },
+      ...(n.size && Number.isFinite(Number(n.size.w)) && Number.isFinite(Number(n.size.h)) ? { size: { w: Number(n.size.w), h: Number(n.size.h) } } : {}),
       params: { ...(n.params ?? {}) },
     })),
+    ...(typeof def?.settings?.loopLimit === 'number' ? { loopLimit: def.settings.loopLimit } : {}),
     edges: edges.map((e) => ({ id: String(e.id ?? newId('e')), source: String(e.source), sourceHandle: String(e.sourceHandle ?? 'main'), target: String(e.target) })),
   }
 }
 
 /** Writes the draft back over the stored definition, keeping keys the UI doesn't know (schemaVersion, future fields). */
 export function toDefinition(base: FlowDefinition | undefined, draft: Draft): FlowDefinition {
-  return { ...(base ?? {}), nodes: draft.nodes.map((n) => ({ ...n })), edges: draft.edges.map((e) => ({ ...e })) }
+  const definition: FlowDefinition = { ...(base ?? {}), nodes: draft.nodes.map((n) => ({ ...n })), edges: draft.edges.map((e) => ({ ...e })) }
+  const settings = { ...((base?.settings as Record<string, unknown> | undefined) ?? {}) }
+  if (draft.loopLimit === undefined) delete settings.loopLimit
+  else settings.loopLimit = draft.loopLimit
+  if (Object.keys(settings).length > 0) definition.settings = settings
+  else delete definition.settings
+  return definition
 }
 
 /** "Script", "Script 2", "Script 3"… so cards of one type stay distinguishable. */
@@ -82,16 +94,16 @@ export function freeSpot(nodes: DraftNode[], start: { x: number; y: number }): {
 }
 
 export function removeNode(draft: Draft, id: string): Draft {
-  return { nodes: draft.nodes.filter((n) => n.id !== id), edges: draft.edges.filter((e) => e.source !== id && e.target !== id) }
+  return { ...draft, nodes: draft.nodes.filter((n) => n.id !== id), edges: draft.edges.filter((e) => e.source !== id && e.target !== id) }
 }
 
 export function removeEdge(draft: Draft, id: string): Draft {
-  return { nodes: draft.nodes, edges: draft.edges.filter((e) => e.id !== id) }
+  return { ...draft, edges: draft.edges.filter((e) => e.id !== id) }
 }
 
 export type ConnectResult = { ok: true } | { ok: false; reason: string }
 
-/** Mirrors the backend rules so the UI refuses early; the backend still validates on save. */
+/** Mirrors the backend rules so the UI refuses early; the backend still validates on save. A connection back to an earlier card is allowed (a loop). */
 export function canConnect(draft: Draft, types: Record<string, CardTypeInfo>, source: string, target: string, handle = 'main'): ConnectResult {
   if (source === target) return { ok: false, reason: 'A card cannot connect to itself.' }
   const t = draft.nodes.find((n) => n.id === target)
@@ -100,22 +112,8 @@ export function canConnect(draft: Draft, types: Record<string, CardTypeInfo>, so
   if (types[t.type]?.isTrigger) return { ok: false, reason: 'A trigger has no input.' }
   if (!(types[s.type]?.outputs ?? [{ key: 'main' }]).some((o) => o.key === handle)) return { ok: false, reason: 'That output does not exist.' }
   if (draft.edges.some((e) => e.source === source && e.sourceHandle === handle && e.target === target)) return { ok: false, reason: 'Already connected.' }
-  if (reaches(draft.edges, target, source)) return { ok: false, reason: 'That would make a loop (not supported yet).' }
+  // a connection back to an earlier card is allowed: it makes a loop
   return { ok: true }
-}
-
-/** Is `to` reachable from `from` following connections? */
-export function reaches(edges: DraftEdge[], from: string, to: string): boolean {
-  const seen = new Set<string>()
-  const stack = [from]
-  while (stack.length) {
-    const id = stack.pop()!
-    if (id === to) return true
-    if (seen.has(id)) continue
-    seen.add(id)
-    for (const e of edges) if (e.source === id) stack.push(e.target)
-  }
-  return false
 }
 
 export function hasTrigger(draft: Draft, types: Record<string, CardTypeInfo>): boolean {

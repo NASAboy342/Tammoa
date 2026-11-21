@@ -47,7 +47,12 @@ Open **Connections**, add your Ollama address (default `http://localhost:11434`;
 - Data moves from card to card: use `{{input.stdout}}` (the previous card's output) and `{{run.input}}` in card settings. Put values in shell commands with `{{input.text | sh}}` so quotes and spaces cannot break the command.
 - Everything runs in the backend, the window only displays the state. Run history is kept in memory (lost when the app closes); **Clear** in the run list removes finished runs, and each flow keeps its newest 50.
 - The side panel can be dragged wider; code and long text open in a larger editor or viewer. Hover shortened names to read them in full.
-- Not built yet: loops, schedule and webhook triggers, OpenAI / Anthropic connections, an agent loop with tool calling.
+- Not built yet: schedule and webhook triggers, OpenAI / Anthropic connections, an agent loop with tool calling.
+
+## Loops and card size
+- **Loop:** drag from a card's right dot back onto a card that comes before it. The line is dashed and labelled *loop*; the target runs again with the new output as its input, and the cards after the loop wait until it is over. End a loop with an **IF** card (its *true* branch goes back, *false* goes on). A loop with no end is stopped at the **loop limit** (field in the toolbar, default 50 runs per card) with a clear message.
+- Cards that ran more than once show `×N`; in the side panel use the round arrows to read what each earlier round got and produced (last 10 kept).
+- **Card size:** cards grow to show their whole title. Drag the small handle at a card's bottom-right corner to resize it; double-click the handle to return to automatic.
 
 ## Vision (mostly not built yet)
 - **Card canvas** with connections, like n8n; flows saved as JSON.

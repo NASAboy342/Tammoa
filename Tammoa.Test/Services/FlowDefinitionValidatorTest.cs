@@ -75,16 +75,15 @@ public class FlowDefinitionValidatorTest
     public void Validate_BadEdge_Throws(string edges) => Assert.Throws<ArgumentException>(() => _sut.Validate(Def(Two, edges)));
 
     [Test]
-    public void Validate_Cycle_ThrowsWithLoopMessage()
+    public void Validate_ConnectionsMayGoBack_ThatIsALoop()
     {
         const string nodes = "[{\"id\":\"a\",\"type\":\"action\"},{\"id\":\"b\",\"type\":\"action\"},{\"id\":\"c\",\"type\":\"action\"}]";
         const string edges = "[{\"source\":\"a\",\"target\":\"b\"},{\"source\":\"b\",\"target\":\"c\"},{\"source\":\"c\",\"target\":\"a\"}]";
-        var ex = Assert.Throws<ArgumentException>(() => _sut.Validate(Def(nodes, edges)));
-        Assert.That(ex!.Message, Does.Contain("Loops"));
+        Assert.DoesNotThrow(() => _sut.Validate(Def(nodes, edges)));
     }
 
     [Test]
-    public void Validate_DiamondIsNotACycle()
+    public void Validate_DiamondIsStillFine()
     {
         const string nodes = "[{\"id\":\"t\",\"type\":\"trigger\"},{\"id\":\"a\",\"type\":\"action\"},{\"id\":\"b\",\"type\":\"action\"},{\"id\":\"d\",\"type\":\"action\"}]";
         const string edges = "[{\"source\":\"t\",\"target\":\"a\"},{\"source\":\"t\",\"target\":\"b\"},{\"source\":\"a\",\"target\":\"d\"},{\"source\":\"b\",\"target\":\"d\"}]";

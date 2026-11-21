@@ -21,7 +21,7 @@ public class WaitCard : ICardType
             new JObject { ["json"] = new JObject { ["id"] = 7 } },
             [new GuideExample("Wait 5 seconds", "Set Seconds to 5. Cancelling the run stops the wait at once.", new JObject { ["seconds"] = 5 }, "5", "text", new JObject { ["json"] = new JObject { ["id"] = 7 } },
                 "After 5 s the same object continues, e.g. {{input.json.id}} is still 7.")],
-            ["Decimals work: 0.5 is half a second."]),
+            ["Decimals work: 0.5 is half a second.", "Inside a loop, Wait spaces out the rounds, for example to check something every 5 seconds."]),
     };
 
     public async Task<CardResult> ExecuteAsync(CardExecutionContext context, CancellationToken ct)

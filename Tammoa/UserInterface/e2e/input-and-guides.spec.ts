@@ -239,8 +239,8 @@ test.describe('Guide tab: a tutorial for every card', () => {
     await expect(page.getByTestId('guide-basics')).toHaveCount(0)
     await page.getByTestId('guide-basics-toggle').click()
     const basics = page.getByTestId('guide-basics')
-    await expect(basics.locator('li')).toHaveCount(5)
-    for (const text of ['{{input.json.name}}', '{{run.input}}', 'input_data', 'runInput', '{{data.Style}}']) await expect(basics).toContainText(text)
+    await expect(basics.locator('li')).toHaveCount(6)
+    for (const text of ['{{input.json.name}}', '{{run.input}}', 'input_data', 'runInput', '{{data.Style}}', 'loop']) await expect(basics).toContainText(text)
   })
 
   test('an example shows the input it assumes, as fields you can read, and what the card then outputs', async ({ page, request }) => {

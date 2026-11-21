@@ -48,7 +48,7 @@ public class IfCard : ICardType
                     new JObject { ["value1"] = "{{input.stdout}}", ["operator"] = "isNotEmpty" },
                     "{{input.stdout}}  is  not empty", "text", new JObject { ["stdout"] = "3 files\n" }, "TRUE runs when the script printed something."),
             ],
-            ["Connect the true and false handles of the card to different cards. Drag from the dot labelled TRUE or FALSE.", "To test the Run input use {{run.input}}.", "\"matches\" takes a regular expression, e.g. ^order-\\d+$"]),
+            ["Connect the true and false handles of the card to different cards. Drag from the dot labelled TRUE or FALSE.", "To make a LOOP, drag one output (TRUE or FALSE) back onto a card BEFORE this one: that card runs again with this card's output as its input, until the IF sends the flow the other way. Cards after the loop run once, when it is over. A card may run at most 50 times per run (the Loop limit).", "To test the Run input use {{run.input}}.", "\"matches\" takes a regular expression, e.g. ^order-\\d+$"]),
     };
 
     public Task<CardResult> ExecuteAsync(CardExecutionContext context, CancellationToken ct)

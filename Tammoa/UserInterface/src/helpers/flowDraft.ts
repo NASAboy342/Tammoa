@@ -13,6 +13,8 @@ export interface DraftNode {
 export interface DraftEdge {
   id: string
   source: string
+  /** Which output of the source card the connection leaves from (default 'main'). */
+  sourceHandle: string
   target: string
 }
 export interface Draft {
@@ -36,7 +38,7 @@ export function toDraft(def: FlowDefinition | undefined): Draft {
       position: { x: Number(n.position?.x ?? 0), y: Number(n.position?.y ?? 0) },
       params: { ...(n.params ?? {}) },
     })),
-    edges: edges.map((e) => ({ id: String(e.id ?? newId('e')), source: String(e.source), target: String(e.target) })),
+    edges: edges.map((e) => ({ id: String(e.id ?? newId('e')), source: String(e.source), sourceHandle: String(e.sourceHandle ?? 'main'), target: String(e.target) })),
   }
 }
 
@@ -90,13 +92,14 @@ export function removeEdge(draft: Draft, id: string): Draft {
 export type ConnectResult = { ok: true } | { ok: false; reason: string }
 
 /** Mirrors the backend rules so the UI refuses early; the backend still validates on save. */
-export function canConnect(draft: Draft, types: Record<string, CardTypeInfo>, source: string, target: string): ConnectResult {
+export function canConnect(draft: Draft, types: Record<string, CardTypeInfo>, source: string, target: string, handle = 'main'): ConnectResult {
   if (source === target) return { ok: false, reason: 'A card cannot connect to itself.' }
   const t = draft.nodes.find((n) => n.id === target)
   const s = draft.nodes.find((n) => n.id === source)
   if (!s || !t) return { ok: false, reason: 'Unknown card.' }
   if (types[t.type]?.isTrigger) return { ok: false, reason: 'A trigger has no input.' }
-  if (draft.edges.some((e) => e.source === source && e.target === target)) return { ok: false, reason: 'Already connected.' }
+  if (!(types[s.type]?.outputs ?? [{ key: 'main' }]).some((o) => o.key === handle)) return { ok: false, reason: 'That output does not exist.' }
+  if (draft.edges.some((e) => e.source === source && e.sourceHandle === handle && e.target === target)) return { ok: false, reason: 'Already connected.' }
   if (reaches(draft.edges, target, source)) return { ok: false, reason: 'That would make a loop (not supported yet).' }
   return { ok: true }
 }

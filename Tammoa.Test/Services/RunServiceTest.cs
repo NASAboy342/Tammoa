@@ -113,6 +113,93 @@ public class RunServiceTest
         Assert.That(token.IsCancellationRequested, Is.True);
     }
 
+    // ---- deleting the log
+    private async Task<FlowRun> FinishedRun()
+    {
+        _flows.Get("f1").Returns(FlowWith("[{\"id\":\"t\",\"type\":\"trigger\"}]"));
+        _executor.ExecuteAsync(default!, default!, default, default!, default).ReturnsForAnyArgs(ci =>
+        {
+            // NSubstitute runs a previously configured callback with null arguments when the same call is re-configured: stay null-safe
+            if (ci.Args()[0] is not FlowRun initial) return Task.FromResult<FlowRun>(null!);
+            var done = initial with { Status = RunStatus.Succeeded, FinishedAt = DateTimeOffset.UtcNow, Revision = 1 };
+            ci.Arg<Action<FlowRun>>()(done);
+            return Task.FromResult(done);
+        });
+        var run = _sut.Start("f1", null);
+        await WaitUntil(() => _sut.Get(run.Id).Status == RunStatus.Succeeded);
+        return run;
+    }
+
+    [Test]
+    public async Task Delete_FinishedRun_RemovesItAndTellsEveryUi()
+    {
+        var run = await FinishedRun();
+        _sut.Delete(run.Id);
+        Assert.Throws<KeyNotFoundException>(() => _sut.Get(run.Id));
+        _bus.Received(1).PublishRemoved("f1", run.Id);
+    }
+
+    [Test]
+    public void Delete_RunningRun_ThrowsInvalidOperation_AndKeepsIt()
+    {
+        _flows.Get("f1").Returns(FlowWith("[{\"id\":\"t\",\"type\":\"trigger\"}]"));
+        var never = new TaskCompletionSource<FlowRun>();
+        _executor.ExecuteAsync(default!, default!, default, default!, default).ReturnsForAnyArgs(never.Task);
+        var run = _sut.Start("f1", null);
+        var ex = Assert.Throws<InvalidOperationException>(() => _sut.Delete(run.Id));
+        Assert.That(ex!.Message, Does.Contain("Cancel"));
+        Assert.That(_sut.Get(run.Id).Status, Is.EqualTo(RunStatus.Running));
+        never.SetResult(run);
+    }
+
+    [Test]
+    public void Delete_Unknown_ThrowsKeyNotFound() => Assert.Throws<KeyNotFoundException>(() => _sut.Delete("nope"));
+
+    [Test]
+    public async Task Clear_RemovesFinishedRunsOfThatFlowOnly_AndKeepsRunningOnes()
+    {
+        var a = await FinishedRun();
+        var b = await FinishedRun();
+        _flows.Get("f2").Returns(FlowWith("[{\"id\":\"t\",\"type\":\"trigger\"}]") with { Id = "f2" });
+        var other = _sut.Start("f2", null);
+        await WaitUntil(() => _sut.Get(other.Id).Status == RunStatus.Succeeded);
+
+        _flows.Get("f1").Returns(FlowWith("[{\"id\":\"t\",\"type\":\"trigger\"}]"));
+        var never = new TaskCompletionSource<FlowRun>();
+        _executor.ExecuteAsync(default!, default!, default, default!, default).ReturnsForAnyArgs(never.Task);
+        var running = _sut.Start("f1", null);
+
+        var removed = _sut.Clear("f1");
+
+        Assert.That(removed, Is.EquivalentTo(new[] { a.Id, b.Id }));
+        Assert.That(_sut.ListForFlow("f1").Select(r => r.Id), Is.EqualTo(new[] { running.Id }));
+        Assert.That(_sut.ListForFlow("f2"), Has.Count.EqualTo(1), "another flow's log is untouched");
+        _bus.Received(1).PublishRemoved("f1", a.Id);
+        _bus.Received(1).PublishRemoved("f1", b.Id);
+        never.SetResult(running);
+    }
+
+    [Test]
+    public void Clear_NothingToClear_ReturnsEmpty() => Assert.That(_sut.Clear("f1"), Is.Empty);
+
+    [Test]
+    public async Task Retention_KeepsOnlyTheNewestRunsPerFlow()
+    {
+        _flows.Get("f1").Returns(FlowWith("[{\"id\":\"t\",\"type\":\"trigger\"}]"));
+        _executor.ExecuteAsync(default!, default!, default, default!, default).ReturnsForAnyArgs(ci =>
+        {
+            // NSubstitute runs a previously configured callback with null arguments when the same call is re-configured: stay null-safe
+            if (ci.Args()[0] is not FlowRun initial) return Task.FromResult<FlowRun>(null!);
+            var done = initial with { Status = RunStatus.Succeeded, FinishedAt = DateTimeOffset.UtcNow, Revision = 1 };
+            ci.Arg<Action<FlowRun>>()(done);
+            return Task.FromResult(done);
+        });
+        for (var i = 0; i < RunService.MaxRunsPerFlow + 5; i++) { _sut.Start("f1", null); await Task.Delay(2); }
+        await WaitUntil(() => _sut.ListForFlow("f1").Count <= RunService.MaxRunsPerFlow && _sut.ListForFlow("f1").All(r => r.Status == RunStatus.Succeeded));
+        Assert.That(_sut.ListForFlow("f1").Count, Is.EqualTo(RunService.MaxRunsPerFlow));
+        _bus.Received().PublishRemoved("f1", Arg.Any<string>());
+    }
+
     [Test]
     public void Cancel_UnknownRun_ThrowsKeyNotFound() => Assert.Throws<KeyNotFoundException>(() => _sut.Cancel("nope"));
 

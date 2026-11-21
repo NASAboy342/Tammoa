@@ -14,6 +14,7 @@ import { useCardTypeStore } from '@/stores/cardTypeStore'
 import { useRunStore } from '@/stores/runStore'
 import { canConnect, freeSpot, hasTrigger, makeNode, newId, removeEdge, removeNode, toDefinition, toDraft, type Draft } from '@/helpers/flowDraft'
 import { parseRunInput } from '@/helpers/runHelpers'
+import { SIDE_DEFAULT, SIDE_MAX, SIDE_MIN, clampSideWidth, widthAfterDrag } from '@/helpers/layout'
 
 const route = useRoute()
 const router = useRouter()
@@ -41,6 +42,52 @@ const deleteError = ref<string | null>(null)
 const runInput = ref('')
 const chosenRunId = ref<string | null>(null)
 let noticeTimer: ReturnType<typeof setTimeout> | undefined
+// ---- resizable side panel (drag the handle, arrow keys, double-click to reset); the width is remembered
+const WIDTH_KEY = 'tammoa-side-width'
+function storedWidth(): number {
+  try {
+    const v = Number(localStorage.getItem(WIDTH_KEY))
+    return v > 0 ? clampSideWidth(v, window.innerWidth) : SIDE_DEFAULT
+  } catch {
+    return SIDE_DEFAULT
+  }
+}
+const sideWidth = ref(storedWidth())
+function saveWidth() {
+  try {
+    localStorage.setItem(WIDTH_KEY, String(sideWidth.value))
+  } catch {
+    /* private mode: the width simply is not remembered */
+  }
+}
+function startResize(e: PointerEvent) {
+  const startX = e.clientX
+  const startWidth = sideWidth.value
+  const move = (m: PointerEvent) => (sideWidth.value = clampSideWidth(widthAfterDrag(startWidth, startX, m.clientX), window.innerWidth))
+  const up = () => {
+    window.removeEventListener('pointermove', move)
+    window.removeEventListener('pointerup', up)
+    saveWidth()
+  }
+  window.addEventListener('pointermove', move)
+  window.addEventListener('pointerup', up)
+}
+function onResizeKey(e: KeyboardEvent) {
+  const step = e.shiftKey ? 80 : 24
+  if (e.key === 'ArrowLeft') sideWidth.value = clampSideWidth(sideWidth.value + step, window.innerWidth)
+  else if (e.key === 'ArrowRight') sideWidth.value = clampSideWidth(sideWidth.value - step, window.innerWidth)
+  else if (e.key === 'Home') sideWidth.value = SIDE_DEFAULT
+  else return
+  e.preventDefault()
+  saveWidth()
+}
+function resetWidth() {
+  sideWidth.value = SIDE_DEFAULT
+  saveWidth()
+}
+const keepWidthInWindow = () => (sideWidth.value = clampSideWidth(sideWidth.value, window.innerWidth))
+window.addEventListener('resize', keepWidthInWindow)
+
 const now = ref(Date.now()) // ticks so the duration of a running run keeps counting
 const clock = setInterval(() => (now.value = Date.now()), 500)
 
@@ -93,6 +140,7 @@ onMounted(async () => {
 onUnmounted(() => {
   clearTimeout(noticeTimer)
   clearInterval(clock)
+  window.removeEventListener('resize', keepWidthInWindow)
 })
 
 function addCard(type: string) {
@@ -109,10 +157,10 @@ function moveNode(nodeId: string, x: number, y: number) {
   if (n) n.position = { x, y }
 }
 
-function connect(source: string, target: string) {
-  const result = canConnect(draft, cards.byType, source, target)
+function connect(source: string, target: string, handle: string) {
+  const result = canConnect(draft, cards.byType, source, target, handle)
   if (!result.ok) return say(result.reason)
-  draft.edges.push({ id: newId('e'), source, target })
+  draft.edges.push({ id: newId('e'), source, sourceHandle: handle, target })
   selection.value = { kind: 'edge', id: draft.edges[draft.edges.length - 1].id }
 }
 
@@ -269,7 +317,25 @@ const inputCls =
           </button>
         </div>
 
-        <aside class="hidden w-80 shrink-0 space-y-5 overflow-auto border-l border-line p-4 md:block" data-testid="side-panel">
+        <div
+          role="separator"
+          aria-orientation="vertical"
+          aria-label="Resize the side panel"
+          :aria-valuenow="sideWidth"
+          :aria-valuemin="SIDE_MIN"
+          :aria-valuemax="SIDE_MAX"
+          tabindex="0"
+          title="Drag to resize (double-click to reset)"
+          class="hidden w-2.5 shrink-0 cursor-col-resize items-center justify-center border-l border-line hover:bg-surface-hover focus-visible:bg-surface-hover md:flex"
+          data-icon-exempt="drag handle, not a button"
+          data-testid="side-resizer"
+          @pointerdown.prevent="startResize"
+          @keydown="onResizeKey"
+          @dblclick="resetWidth"
+        >
+          <AppIcon name="grip-vertical" :size="12" class="text-muted" />
+        </div>
+        <aside class="hidden shrink-0 space-y-5 overflow-auto p-4 md:block" :style="{ width: `${sideWidth}px` }" data-testid="side-panel">
           <p v-if="activeRun?.error" class="flex items-start gap-1.5 rounded-control border-2 border-dashed border-ink p-2 text-xs font-semibold" data-testid="run-failure"><AppIcon name="x-circle" :size="14" class="mt-0.5" /> {{ activeRun.error }}</p>
           <CardInspector
             v-if="selectedNode"
@@ -284,7 +350,7 @@ const inputCls =
             @remove="removeSelection"
           />
           <p v-else class="flex items-center gap-1.5 text-xs text-muted" data-testid="inspector-hint"><AppIcon name="info" :size="13" /> Select a card to edit it</p>
-          <RunPanel :runs="flowRuns" :active-id="activeRun?.id ?? null" :now="now" @select="chosenRunId = $event" @cancel="runs.cancel($event)" />
+          <RunPanel :runs="flowRuns" :active-id="activeRun?.id ?? null" :now="now" @select="chosenRunId = $event" @cancel="runs.cancel($event)" @remove="runs.remove($event)" @clear="runs.clear(id)" />
         </aside>
       </div>
     </template>

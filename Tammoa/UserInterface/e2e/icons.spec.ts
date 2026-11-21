@@ -90,6 +90,80 @@ test('the card editor (palette, selected card, run panel, running state): every 
   expect(await withoutIcon(page), 'connection selected').toEqual([])
 })
 
+test('code editor, output viewer, run log, IF and AI cards: every clickable has an icon', async ({ page, request }) => {
+  const flow = await (await request.post('/api/flows', { data: { name: `Audit ${Date.now()}`, description: '' } })).json()
+  const long = 'Long description of what this flow does. '.repeat(10)
+  const nodes = [
+    { id: 't', type: 'trigger.manual', name: 'Start', position: { x: 0, y: 0 }, params: {} },
+    { id: 'i', type: 'logic.if', name: 'Decide', position: { x: 260, y: 0 }, params: { value1: 'a', operator: 'equals', value2: 'a' } },
+    { id: 'c', type: 'script.shell', name: 'Script', position: { x: 560, y: 0 }, params: { language: 'javascript', command: 'console.log(1)' } },
+    { id: 'a', type: 'ai.ollama', name: 'Ask', position: { x: 560, y: 120 }, params: {} },
+  ]
+  const edges = [{ id: 'e1', source: 't', target: 'i' }, { id: 'e2', source: 'i', sourceHandle: 'true', target: 'c' }]
+  await request.put(`/api/flows/${flow.id}`, { data: { name: flow.name, description: long.slice(0, 200), definition: { nodes, edges } } })
+  await page.goto(`/#/flows/${flow.id}`)
+  await expect(page.getByTestId('node-c')).toBeVisible()
+
+  await page.getByTestId('palette-toggle').click()
+  await expect(page.getByTestId('palette-group-ai')).toBeVisible()
+  expect(await withoutIcon(page), 'palette (groups, search)').toEqual([])
+  await page.keyboard.press('Escape')
+
+  await page.getByTestId('node-i').click()
+  await expect(page.getByTestId('param-input-operator')).toBeVisible()
+  expect(await withoutIcon(page), 'IF card selected (select)').toEqual([])
+
+  await page.getByTestId('node-c').click()
+  await expect(page.getByTestId('code-expand')).toBeVisible()
+  await expect(page.getByTestId('expand-text')).toBeVisible()
+  expect(await withoutIcon(page), 'script card selected (code editor, Show more)').toEqual([])
+  await page.getByTestId('code-expand').click()
+  await expect(page.getByTestId('code-dialog')).toBeVisible()
+  expect(await withoutIcon(page), 'large code editor dialog').toEqual([])
+  await page.getByTestId('code-collapse').click()
+
+  await page.getByTestId('node-a').click()
+  await expect(page.getByTestId('manage-connections')).toBeVisible()
+  expect(await withoutIcon(page), 'AI card selected (connection + model selects, reload, link)').toEqual([])
+
+  await page.getByTestId('run').click() // the flow is already saved, so Run is available
+  await expect(page.locator('[data-testid^="run-row-"][data-status="succeeded"]')).toHaveCount(1) // IF (a = a) → true → the JavaScript card
+  await page.getByTestId('node-c').click()
+  await expect(page.getByTestId('output-copy')).toBeVisible()
+  expect(await withoutIcon(page), 'finished run: delete, clear, output copy / full').toEqual([])
+  await page.getByTestId('output-expand').click()
+  await expect(page.getByTestId('output-dialog')).toBeVisible()
+  expect(await withoutIcon(page), 'output in full dialog').toEqual([])
+})
+
+test('connections page and its dialogs: every clickable has an icon, every field a leading icon', async ({ page, request }) => {
+  const c = await (await request.post('/api/connections', { data: { name: `Audit ${Date.now()}`, provider: 'ollama', baseUrl: 'http://127.0.0.1:1', apiKey: 'k' } })).json()
+  await page.goto('/#/connections')
+  await expect(page.getByTestId(`connection-row-${c.id}`)).toBeVisible()
+  await page.getByTestId(`connection-test-${c.id}`).click()
+  await expect(page.getByTestId(`connection-result-${c.id}`)).toBeVisible()
+  expect(await withoutIcon(page), 'connections list with a failed test').toEqual([])
+
+  await page.getByTestId('new-connection').click()
+  await expect(page.getByTestId('connection-dialog')).toBeVisible()
+  expect(await withoutIcon(page), 'new connection dialog').toEqual([])
+  for (const id of ['conn-name', 'conn-provider', 'conn-url', 'conn-key']) {
+    expect(await page.getByTestId(id).locator('xpath=..').locator('svg[data-icon]').count(), id).toBeGreaterThanOrEqual(1)
+  }
+  await page.getByTestId('conn-cancel').click()
+
+  await page.getByTestId(`connection-edit-${c.id}`).click()
+  await expect(page.getByTestId('conn-clear-key')).toBeVisible()
+  expect(await withoutIcon(page), 'edit connection dialog (remove key switch)').toEqual([])
+  await page.getByTestId('conn-cancel').click()
+
+  await page.getByTestId(`connection-delete-${c.id}`).click()
+  await expect(page.getByTestId('confirm-dialog')).toBeVisible()
+  expect(await withoutIcon(page), 'confirm dialog').toEqual([])
+  await page.getByTestId('confirm-cancel').click()
+  await request.delete(`/api/connections/${c.id}`)
+})
+
 test('the audit really looks at the controls (not an empty selection)', async ({ page }) => {
   await page.goto(ROUTES[0])
   await page.getByTestId('flows').waitFor()

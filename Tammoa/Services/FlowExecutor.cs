@@ -18,13 +18,15 @@ public class FlowExecutor : IFlowExecutor
     public async Task<FlowRun> ExecuteAsync(FlowRun initial, JObject definition, JToken? runInput, Action<FlowRun> onChange, CancellationToken ct)
     {
         var nodes = ((JArray)(definition["nodes"] ?? new JArray())).Cast<JObject>().ToDictionary(n => (string)n["id"]!);
-        var edges = ((JArray)(definition["edges"] ?? new JArray())).Cast<JObject>().Select(e => (Source: (string)e["source"]!, Target: (string)e["target"]!)).ToList();
-        var parents = nodes.Keys.ToDictionary(k => k, k => edges.Where(e => e.Target == k).Select(e => e.Source).ToList());
+        var edges = ((JArray)(definition["edges"] ?? new JArray())).Cast<JObject>()
+            .Select(e => (Source: (string)e["source"]!, Handle: (string?)e["sourceHandle"] ?? "main", Target: (string)e["target"]!)).ToList();
+        var incoming = nodes.Keys.ToDictionary(k => k, k => edges.Where(e => e.Target == k).ToList());
 
         var run = initial;
         var status = nodes.Keys.ToDictionary(k => k, _ => NodeRunStatus.Pending);
         var outputs = new Dictionary<string, JToken>();
-        var running = new Dictionary<Task<JToken>, string>();
+        var branches = new Dictionary<string, string?>(); // which output handle a branching card fired (null = all)
+        var running = new Dictionary<Task<CardResult>, string>();
         string? firstError = null;
 
         // Only this loop mutates state (card work runs on other threads but reports back through Task results).
@@ -45,25 +47,26 @@ public class FlowExecutor : IFlowExecutor
                 foreach (var id in nodes.Keys.Where(k => status[k] == NodeRunStatus.Pending).ToList())
                 {
                     var card = _cards.Find((string)nodes[id]["type"]!);
-                    var ps = parents[id];
+                    var inc = incoming[id];
                     var now = _time.GetUtcNow();
 
                     if (ct.IsCancellationRequested) { Set(id, new NodeRun(id, NodeRunStatus.Cancelled, FinishedAt: now)); changed = true; continue; }
                     if (firstError is not null) { Set(id, new NodeRun(id, NodeRunStatus.Skipped, FinishedAt: now)); changed = true; continue; }
 
-                    bool ready;
-                    if (ps.Count == 0)
+                    List<(string Source, string Handle, string Target)> active;
+                    if (inc.Count == 0)
                     {
                         if (card is null || !card.Info.IsTrigger) { Set(id, new NodeRun(id, NodeRunStatus.Skipped, FinishedAt: now)); changed = true; continue; }
-                        ready = true;
+                        active = [];
                     }
-                    else if (ps.Any(p => status[p] is NodeRunStatus.Failed or NodeRunStatus.Skipped or NodeRunStatus.Cancelled))
+                    else
                     {
-                        Set(id, new NodeRun(id, NodeRunStatus.Skipped, FinishedAt: now)); changed = true; continue;
+                        // wait until every parent is finished, then run on the connections that are active:
+                        // the parent succeeded and (it is not a branching card, or it fired this connection's handle)
+                        if (inc.Any(e => status[e.Source] is NodeRunStatus.Pending or NodeRunStatus.Running)) continue;
+                        active = inc.Where(e => status[e.Source] == NodeRunStatus.Succeeded && (branches[e.Source] is null || branches[e.Source] == e.Handle)).ToList();
+                        if (active.Count == 0) { Set(id, new NodeRun(id, NodeRunStatus.Skipped, FinishedAt: now)); changed = true; continue; }
                     }
-                    else ready = ps.All(p => status[p] == NodeRunStatus.Succeeded);
-
-                    if (!ready) continue;
                     if (card is null)
                     {
                         Set(id, new NodeRun(id, NodeRunStatus.Failed, now, now, Error: $"Unknown card type '{(string)nodes[id]["type"]!}'."));
@@ -72,7 +75,7 @@ public class FlowExecutor : IFlowExecutor
                         continue;
                     }
 
-                    JToken? input = ps.Count == 0 ? null : ps.Count == 1 ? outputs[ps[0]] : new JArray(ps.Select(p => outputs[p]));
+                    JToken? input = active.Count == 0 ? null : active.Count == 1 ? outputs[active[0].Source] : new JArray(active.Select(e => outputs[e.Source]));
                     var p = nodes[id]["params"] as JObject ?? new JObject();
                     startedAt[id] = now;
                     Set(id, new NodeRun(id, NodeRunStatus.Running, now));
@@ -90,9 +93,10 @@ public class FlowExecutor : IFlowExecutor
             var finished = _time.GetUtcNow();
             try
             {
-                var output = await done;
-                outputs[doneId] = output;
-                Set(doneId, new NodeRun(doneId, NodeRunStatus.Succeeded, startedAt[doneId], finished, output));
+                var result = await done;
+                outputs[doneId] = result.Output;
+                branches[doneId] = result.Branch;
+                Set(doneId, new NodeRun(doneId, NodeRunStatus.Succeeded, startedAt[doneId], finished, result.Output));
             }
             catch (OperationCanceledException) when (ct.IsCancellationRequested)
             {

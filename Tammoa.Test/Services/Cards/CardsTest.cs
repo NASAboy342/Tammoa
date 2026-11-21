@@ -15,14 +15,14 @@ public class CardsTest
     [Test]
     public async Task ManualTrigger_OutputsRunInput()
     {
-        var r = await new ManualTriggerCard().ExecuteAsync(Ctx("{}", runInput: "hello"), default);
+        var r = (await new ManualTriggerCard().ExecuteAsync(Ctx("{}", runInput: "hello"), default)).Output;
         Assert.That((string?)r["input"], Is.EqualTo("hello"));
     }
 
     [Test]
     public async Task ManualTrigger_NoRunInput_OutputsNull()
     {
-        var r = await new ManualTriggerCard().ExecuteAsync(Ctx("{}"), default);
+        var r = (await new ManualTriggerCard().ExecuteAsync(Ctx("{}"), default)).Output;
         Assert.That(r["input"]!.Type, Is.EqualTo(JTokenType.Null));
     }
 
@@ -36,7 +36,7 @@ public class CardsTest
     public async Task SetValue_ResolvesTemplatesAgainstInputAndRunInput()
     {
         var input = JObject.Parse("{\"stdout\":\"out\",\"n\":3}");
-        var r = await Set().ExecuteAsync(Ctx("{\"values\":\"{\\\"a\\\":\\\"{{input.stdout}}\\\",\\\"n\\\":\\\"{{input.n}}\\\",\\\"r\\\":\\\"{{run.input}}\\\"}\"}", input, "ri"), default);
+        var r = (await Set().ExecuteAsync(Ctx("{\"values\":\"{\\\"a\\\":\\\"{{input.stdout}}\\\",\\\"n\\\":\\\"{{input.n}}\\\",\\\"r\\\":\\\"{{run.input}}\\\"}\"}", input, "ri"), default)).Output;
         Assert.That((string?)r["a"], Is.EqualTo("out"));
         Assert.That(r["n"]!.Type, Is.EqualTo(JTokenType.Integer));
         Assert.That((string?)r["r"], Is.EqualTo("ri"));
@@ -50,20 +50,20 @@ public class CardsTest
         Assert.ThrowsAsync<ArgumentException>(() => Set().ExecuteAsync(Ctx(p), default));
 
     // --- shell script (process runner substituted)
-    private static (ShellScriptCard Card, IProcessRunner Runner) Shell(ProcessResult? result = null)
+    private static (ScriptCard Card, IProcessRunner Runner) Shell(ProcessResult? result = null)
     {
         var runner = Substitute.For<IProcessRunner>();
-        runner.RunAsync(default!, default!, default, default, default)
+        runner.RunAsync(default!, default!, default, default, default, default)
             .ReturnsForAnyArgs(Task.FromResult(result ?? new ProcessResult(0, "out", "", false, false)));
-        return (new ShellScriptCard(new TemplateEngine(), runner), runner);
+        return (new ScriptCard(new TemplateEngine(), runner), runner);
     }
 
     [Test]
     public async Task Shell_RendersCommandWithTemplatesAndReturnsOutput()
     {
         var (card, runner) = Shell();
-        var r = await card.ExecuteAsync(Ctx("{\"command\":\"echo {{input.x | sh}}\",\"workingDirectory\":\"" + Path.GetTempPath().Replace("\\", "\\\\") + "\",\"stdin\":\"in {{input.x}}\",\"timeoutSeconds\":\"5\"}", JObject.Parse("{\"x\":\"a b\"}")), default);
-        await runner.Received(1).RunAsync("echo 'a b'", Arg.Any<string>(), "in a b", TimeSpan.FromSeconds(5), Arg.Any<CancellationToken>());
+        var r = (await card.ExecuteAsync(Ctx("{\"command\":\"echo {{input.x | sh}}\",\"workingDirectory\":\"" + Path.GetTempPath().Replace("\\", "\\\\") + "\",\"stdin\":\"in {{input.x}}\",\"timeoutSeconds\":\"5\"}", JObject.Parse("{\"x\":\"a b\"}")), default)).Output;
+        await runner.Received(1).RunAsync("echo 'a b'", Arg.Any<string>(), "in a b", TimeSpan.FromSeconds(5), Arg.Any<CancellationToken>(), Arg.Any<IReadOnlyDictionary<string, string>?>());
         Assert.That((string?)r["stdout"], Is.EqualTo("out"));
         Assert.That((int)r["exitCode"]!, Is.EqualTo(0));
     }
@@ -73,7 +73,7 @@ public class CardsTest
     {
         var (card, runner) = Shell();
         await card.ExecuteAsync(Ctx("{\"command\":\"ls\"}"), default);
-        await runner.Received(1).RunAsync("ls", Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), null, TimeSpan.FromSeconds(30), Arg.Any<CancellationToken>());
+        await runner.Received(1).RunAsync("ls", Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), null, TimeSpan.FromSeconds(30), Arg.Any<CancellationToken>(), Arg.Any<IReadOnlyDictionary<string, string>?>());
     }
 
     [Test]
@@ -88,7 +88,7 @@ public class CardsTest
     public async Task Shell_NonZeroExitWithFailOnErrorOff_Succeeds()
     {
         var (card, _) = Shell(new ProcessResult(2, "", "boom", false, false));
-        var r = await card.ExecuteAsync(Ctx("{\"command\":\"x\",\"failOnError\":false}"), default);
+        var r = (await card.ExecuteAsync(Ctx("{\"command\":\"x\",\"failOnError\":false}"), default)).Output;
         Assert.That((int)r["exitCode"]!, Is.EqualTo(2));
     }
 
@@ -109,7 +109,7 @@ public class CardsTest
     {
         var (card, runner) = Shell();
         Assert.ThrowsAsync<ArgumentException>(() => card.ExecuteAsync(Ctx(p), default));
-        runner.DidNotReceiveWithAnyArgs().RunAsync(default!, default!, default, default, default);
+        runner.DidNotReceiveWithAnyArgs().RunAsync(default!, default!, default, default, default, default);
     }
 
     // --- registry

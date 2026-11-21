@@ -106,9 +106,9 @@ const iconBtn =
             class="inline-flex max-w-full items-center gap-1.5 truncate font-semibold hover:underline"
             :data-testid="`flow-open-${flow.id}`"
           >
-            <AppIcon name="edit" :size="13" /> <span class="truncate" data-testid="flow-name">{{ flow.name }}</span>
+            <AppIcon name="edit" :size="13" /> <span class="truncate" :title="flow.name" data-testid="flow-name">{{ flow.name }}</span>
           </RouterLink>
-          <p v-if="flow.description" class="truncate text-xs text-ink-soft">{{ flow.description }}</p>
+          <p v-if="flow.description" class="truncate text-xs text-ink-soft" :title="flow.description">{{ flow.description }}</p>
           <p class="mt-0.5 flex flex-wrap items-center gap-x-3 text-[11px] text-muted">
             <span class="inline-flex items-center gap-1 whitespace-nowrap"><AppIcon name="layers" :size="11" /> {{ flow.cardCount }} cards</span>
             <span class="inline-flex items-center gap-1 whitespace-nowrap"><AppIcon name="clock" :size="11" /> {{ formatWhen(flow.updatedAt) }}</span>

@@ -13,5 +13,13 @@ public static class DataPaths
         return Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "Tammoa");
     }
 
+    /// <summary>Creates the data folder and, on macOS/Linux, makes it owner-only: it holds the database, which stores connection API keys in plaintext.</summary>
+    public static void RestrictToOwner(string dir)
+    {
+        Directory.CreateDirectory(dir);
+        if (!OperatingSystem.IsWindows())
+            File.SetUnixFileMode(dir, UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute);
+    }
+
     public static string DatabaseFile() => Path.Combine(DataDir(), "tammoa.db");
 }

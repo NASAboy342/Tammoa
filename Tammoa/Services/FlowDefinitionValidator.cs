@@ -29,6 +29,7 @@ public class FlowDefinitionValidator : IFlowDefinitionValidator
         if (nodes.Count > MaxNodes) throw new ArgumentException($"A flow is limited to {MaxNodes} cards.");
 
         var triggers = new HashSet<string>();
+        var handles = new Dictionary<string, HashSet<string>>(); // card id -> its output handle keys
         var ids = new HashSet<string>();
         foreach (var token in nodes)
         {
@@ -40,6 +41,7 @@ public class FlowDefinitionValidator : IFlowDefinitionValidator
             var type = node["type"]?.Type == JTokenType.String ? (string)node["type"]! : "";
             var card = _cards.Find(type) ?? throw new ArgumentException($"Unknown card type '{type}'.");
             if (card.Info.IsTrigger) triggers.Add(id);
+            handles[id] = card.Info.Outputs.Select(o => o.Key).ToHashSet();
 
             if (node["name"] is { Type: not JTokenType.Null } name && (name.Type != JTokenType.String || ((string)name!).Length > MaxNameLength))
                 throw new ArgumentException($"A card name must be text of at most {MaxNameLength} characters.");
@@ -50,7 +52,7 @@ public class FlowDefinitionValidator : IFlowDefinitionValidator
                 throw new ArgumentException($"Card '{id}': position must be {{ x, y }} numbers.");
         }
 
-        var links = new HashSet<(string, string)>();
+        var links = new HashSet<(string, string, string)>();
         var children = ids.ToDictionary(i => i, _ => new List<string>());
         foreach (var token in edges)
         {
@@ -59,7 +61,9 @@ public class FlowDefinitionValidator : IFlowDefinitionValidator
             var target = edge["target"]?.Type == JTokenType.String ? (string)edge["target"]! : "";
             if (!ids.Contains(source) || !ids.Contains(target)) throw new ArgumentException("A connection points at a card that does not exist.");
             if (source == target) throw new ArgumentException("A card cannot connect to itself.");
-            if (!links.Add((source, target))) throw new ArgumentException("Two cards are connected twice.");
+            var handle = edge["sourceHandle"] is { Type: not JTokenType.Null } h ? (h.Type == JTokenType.String ? (string)h! : "") : "main";
+            if (!handles[source].Contains(handle)) throw new ArgumentException($"A connection starts from an output ('{handle}') that card '{source}' does not have.");
+            if (!links.Add((source, handle, target))) throw new ArgumentException("Two cards are connected twice.");
             if (triggers.Contains(target)) throw new ArgumentException("A trigger card cannot have an incoming connection.");
             children[source].Add(target);
         }

@@ -2,7 +2,7 @@
 /** Centered dialog over a dimmed backdrop, teleported to body (avoids clipping). Esc and backdrop click emit `close`. */
 import { onMounted, onUnmounted } from 'vue'
 
-defineProps<{ testid?: string; labelledby?: string }>()
+withDefaults(defineProps<{ testid?: string; labelledby?: string; size?: 'md' | 'xl' }>(), { testid: undefined, labelledby: undefined, size: 'md' })
 const emit = defineEmits<{ close: [] }>()
 
 function onKey(e: KeyboardEvent) {
@@ -20,7 +20,8 @@ onUnmounted(() => window.removeEventListener('keydown', onKey))
         aria-modal="true"
         :aria-labelledby="labelledby"
         :data-testid="testid"
-        class="w-full max-w-md rounded-card border border-line-strong bg-surface p-5"
+        class="w-full rounded-card border border-line-strong bg-surface p-5"
+        :class="size === 'xl' ? 'max-w-5xl' : 'max-w-md'"
       >
         <slot />
       </div>

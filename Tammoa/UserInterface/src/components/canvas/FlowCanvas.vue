@@ -27,26 +27,33 @@ const props = defineProps<{
 const emit = defineEmits<{
   move: [id: string, x: number, y: number]
   select: [selection: Selection | null]
-  connect: [source: string, target: string]
+  connect: [source: string, target: string, handle: string]
   remove: []
 }>()
 
 const el = ref<HTMLElement | null>(null)
 const view = reactive<View>({ x: 40, y: 40, k: 1 })
-const link = ref<{ source: string; to: Point } | null>(null)
+const link = ref<{ source: string; handle: string; to: Point } | null>(null)
 
 const byId = computed(() => new Map(props.nodes.map((n) => [n.id, n])))
+/** The output handles of a card, in display order (most cards have just "main"). */
+const outputsOf = (node: DraftNode) => props.types[node.type]?.outputs?.length ? props.types[node.type].outputs : [{ key: 'main', label: '' }]
+const portOf = (node: DraftNode, handle: string) => {
+  const outs = outputsOf(node)
+  return outputPort(node.position, Math.max(0, outs.findIndex((o) => o.key === handle)), outs.length)
+}
+
 const paths = computed(() =>
   props.edges.flatMap((e) => {
     const s = byId.value.get(e.source)
     const t = byId.value.get(e.target)
-    return s && t ? [{ id: e.id, d: edgePath(outputPort(s.position), inputPort(t.position)) }] : []
+    return s && t ? [{ id: e.id, d: edgePath(portOf(s, e.sourceHandle ?? 'main'), inputPort(t.position)) }] : []
   }),
 )
 const linkPath = computed(() => {
   const l = link.value
   const s = l && byId.value.get(l.source)
-  return l && s ? edgePath(outputPort(s.position), l.to) : ''
+  return l && s ? edgePath(portOf(s, l.handle), l.to) : ''
 })
 
 function worldAt(e: { clientX: number; clientY: number }): Point {
@@ -93,17 +100,17 @@ function onNodeDown(e: PointerEvent, node: DraftNode) {
   )
 }
 
-function onOutputDown(e: PointerEvent, node: DraftNode) {
+function onOutputDown(e: PointerEvent, node: DraftNode, handle: string) {
   emit('select', { kind: 'node', id: node.id })
-  link.value = { source: node.id, to: worldAt(e) }
+  link.value = { source: node.id, handle, to: worldAt(e) }
   gesture(
     (m) => {
-      if (link.value) link.value = { source: node.id, to: worldAt(m) }
+      if (link.value) link.value = { source: node.id, handle, to: worldAt(m) }
     },
     (up) => {
       const target = (document.elementFromPoint(up.clientX, up.clientY) as HTMLElement | null)?.closest<HTMLElement>('[data-node-card]')
       link.value = null
-      if (target?.dataset.nodeId && target.dataset.nodeId !== node.id) emit('connect', node.id, target.dataset.nodeId)
+      if (target?.dataset.nodeId && target.dataset.nodeId !== node.id) emit('connect', node.id, target.dataset.nodeId, handle)
     },
   )
 }
@@ -180,6 +187,7 @@ function nodeClass(node: DraftNode) {
         :data-status="states[node.id] ?? 'idle'"
         role="group"
         :aria-label="node.name"
+        :title="`${node.name} (${types[node.type]?.name ?? node.type})`"
         class="pointer-events-auto absolute flex cursor-grab items-center gap-2.5 rounded-card bg-surface px-3 active:cursor-grabbing"
         :class="nodeClass(node)"
         :style="{ left: `${node.position.x}px`, top: `${node.position.y}px`, width: `${NODE_W}px`, height: `${NODE_H}px` }"
@@ -202,17 +210,28 @@ function nodeClass(node: DraftNode) {
           v-if="states[node.id] && states[node.id] !== 'pending'"
           :name="nodeStatusIcon[states[node.id]!]"
           :size="15"
-          :class="states[node.id] === 'running' ? 'animate-spin' : ''"
+          :class="[states[node.id] === 'running' ? 'animate-spin' : '', outputsOf(node).length > 1 ? 'mr-9' : '']"
           :title="statusLabel(states[node.id]!)"
           data-testid="node-status"
         />
-        <span
-          data-handle="out"
-          class="absolute -right-[7px] top-1/2 h-3.5 w-3.5 -translate-y-1/2 cursor-crosshair rounded-full border-[1.5px] border-ink bg-ink"
-          data-icon-exempt="connection handle, not a button"
-          :data-testid="`out-${node.id}`"
-          @pointerdown.stop.prevent="onOutputDown($event, node)"
-        />
+        <template v-for="(o, i) in outputsOf(node)" :key="o.key">
+          <span
+            v-if="outputsOf(node).length > 1"
+            class="pointer-events-none absolute right-3.5 -translate-y-1/2 rounded bg-surface px-1 text-[9px] font-semibold uppercase tracking-wide text-ink-soft"
+            :style="{ top: `${((i + 1) / (outputsOf(node).length + 1)) * 100}%` }"
+            data-testid="handle-label"
+          >{{ o.label || o.key }}</span>
+          <span
+            data-handle="out"
+            :data-handle-key="o.key"
+            class="absolute -right-[7px] h-3.5 w-3.5 -translate-y-1/2 cursor-crosshair rounded-full border-[1.5px] border-ink bg-ink"
+            :style="{ top: `${((i + 1) / (outputsOf(node).length + 1)) * 100}%` }"
+            data-icon-exempt="connection handle, not a button"
+            :title="outputsOf(node).length > 1 ? `Output: ${o.label || o.key}` : 'Drag to connect'"
+            :data-testid="`out-${node.id}-${o.key}`"
+            @pointerdown.stop.prevent="onOutputDown($event, node, o.key)"
+          />
+        </template>
       </div>
     </div>
 
@@ -230,6 +249,11 @@ function nodeClass(node: DraftNode) {
 </template>
 
 <style scoped>
+/* keyboard focus is shown, but as a hairline inside the canvas instead of a heavy frame around it */
+.canvas-grid:focus-visible {
+  outline: 1px solid var(--line-strong);
+  outline-offset: -1px;
+}
 .canvas-grid {
   background-image: radial-gradient(var(--line-strong) 1px, transparent 1px);
   background-size: 22px 22px;

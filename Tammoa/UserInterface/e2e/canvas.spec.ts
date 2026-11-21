@@ -1,37 +1,5 @@
-import { expect, test, type APIRequestContext, type Locator, type Page } from '@playwright/test'
-
-const unique = (label: string) => `${label} ${Date.now()}-${Math.floor(Math.random() * 1e4)}`
-
-type N = { id: string; type: string; name: string; position: { x: number; y: number }; params: Record<string, unknown> }
-const trigger = (id = 't', x = 0): N => ({ id, type: 'trigger.manual', name: 'Manual trigger', position: { x, y: 0 }, params: {} })
-const script = (id: string, command: string, x = 280, extra: Record<string, unknown> = {}): N => ({ id, type: 'script.shell', name: `Script ${id}`, position: { x, y: 0 }, params: { command, ...extra } })
-const setv = (id: string, values: string, x = 280): N => ({ id, type: 'data.set', name: `Set ${id}`, position: { x, y: 0 }, params: { values } })
-const edge = (source: string, target: string) => ({ id: `e-${source}-${target}`, source, target })
-
-/** Creates a flow through the API with the given cards (seeding only; the behaviour under test is driven through the UI). */
-async function makeFlow(request: APIRequestContext, nodes: N[], edges: { id: string; source: string; target: string }[] = []) {
-  const flow = await (await request.post('/api/flows', { data: { name: unique('Canvas'), description: '' } })).json()
-  const res = await request.put(`/api/flows/${flow.id}`, { data: { name: flow.name, description: '', definition: { schemaVersion: 1, nodes, edges } } })
-  expect(res.status(), await res.text()).toBe(200)
-  return flow as { id: string; name: string }
-}
-
-async function open(page: Page, id: string) {
-  await page.goto(`/#/flows/${id}`)
-  await expect(page.getByTestId('canvas')).toBeVisible()
-}
-
-async function drag(page: Page, from: Locator, to: Locator) {
-  const a = (await from.boundingBox())!
-  const b = (await to.boundingBox())!
-  await page.mouse.move(a.x + a.width / 2, a.y + a.height / 2)
-  await page.mouse.down()
-  await page.mouse.move(b.x + b.width / 2, b.y + b.height / 2, { steps: 8 })
-  await page.mouse.up()
-}
-
-const node = (page: Page, id: string) => page.getByTestId(`node-${id}`)
-const nodeCount = (page: Page) => page.locator('[data-node-card]').count()
+import { expect, test } from '@playwright/test'
+import { codeOf, drag, edge, makeFlow, node, nodeCount, open, script, setCode, setv, trigger } from './helpers'
 
 test.describe('building a flow on the canvas', () => {
   test('the palette lists the card types the backend offers', async ({ page, request }) => {
@@ -55,7 +23,7 @@ test.describe('building a flow on the canvas', () => {
 
     // the new script card is selected: its inspector shows the backend-described form
     await expect(page.getByTestId('param-input-command')).toBeVisible()
-    await page.getByTestId('param-input-command').fill('echo built in the ui')
+    await setCode(page, 'param-input-command', 'echo built in the ui')
     await page.getByTestId('param-input-timeoutSeconds').fill('12')
     await page.getByTestId('inspector-name').fill('Greeter')
 
@@ -74,7 +42,7 @@ test.describe('building a flow on the canvas', () => {
     await expect.poll(() => nodeCount(page)).toBe(2)
     await expect(page.locator('[data-testid^="edge-e-"]')).toHaveCount(1)
     await page.locator('[data-node-card]').filter({ hasText: 'Greeter' }).click()
-    await expect(page.getByTestId('param-input-command')).toHaveValue('echo built in the ui')
+    await expect(codeOf(page, 'param-input-command')).toContainText('echo built in the ui')
     await expect(page.getByTestId('param-input-timeoutSeconds')).toHaveValue('12')
   })
 
@@ -93,7 +61,7 @@ test.describe('building a flow on the canvas', () => {
   test('delete a card with the key and a connection with the button', async ({ page, request }) => {
     const flow = await makeFlow(request, [trigger(), script('a', 'echo a'), script('b', 'echo b', 560)], [edge('t', 'a'), edge('a', 'b')])
     await open(page, flow.id)
-    await page.locator('[data-testid="edge-e-a-b"] path').last().click({ force: true })
+    await page.locator('[data-testid="edge-e-a-main-b"] path').last().click({ force: true })
     await page.getByTestId('edge-delete').click()
     await expect(page.locator('[data-testid^="edge-e-"]')).toHaveCount(1)
     await node(page, 'a').click()
@@ -145,9 +113,9 @@ test.describe('running a flow (all execution happens in the backend)', () => {
     await expect(page.locator('[data-testid^="run-row-"]').first()).toHaveAttribute('data-status', 'succeeded')
 
     await node(page, 'c').click()
-    await expect(page.getByTestId('inspector-output')).toContainText("got it's alive") // quoted safely through the shell
+    await expect(page.getByTestId('inspector-result').getByTestId('output-preview')).toContainText("got it's alive") // quoted safely through the shell
     await node(page, 's').click()
-    await expect(page.getByTestId('inspector-output')).toContainText('"msg": "it\'s alive"')
+    await expect(page.getByTestId('inspector-result').getByTestId('output-preview')).toContainText('"msg": "it\'s alive"')
   })
 
   test('state shows up immediately: finished cards turn green while a later card still runs (a stale start response must not overwrite pushed state)', async ({ page, request }) => {
@@ -224,10 +192,21 @@ test.describe('running a flow (all execution happens in the backend)', () => {
 test.describe('backend contract', () => {
   test('GET /api/cards/types describes the cards and their params', async ({ request }) => {
     const types = await (await request.get('/api/cards/types')).json()
-    expect(types.map((t: { type: string }) => t.type).sort()).toEqual(['data.set', 'script.shell', 'trigger.manual'])
+    expect(types.map((t: { type: string }) => t.type).sort()).toEqual([
+      'ai.ollama', 'data.json', 'data.merge', 'data.set', 'file.read', 'file.write', 'flow.wait', 'logic.if', 'net.http', 'script.shell', 'trigger.manual',
+    ])
     const shell = types.find((t: { type: string }) => t.type === 'script.shell')
-    expect(shell.params.map((p: { key: string }) => p.key)).toEqual(['command', 'workingDirectory', 'stdin', 'timeoutSeconds', 'failOnError'])
-    expect(shell.params[3]).toMatchObject({ kind: 'number', defaultValue: 30 })
+    expect(shell.params.map((p: { key: string }) => p.key)).toEqual(['language', 'command', 'interpreter', 'workingDirectory', 'stdin', 'timeoutSeconds', 'failOnError'])
+    expect(shell.params[0]).toMatchObject({ kind: 'select', defaultValue: 'shell' })
+    expect(shell.params[0].options.map((o: { value: string }) => o.value)).toEqual(['shell', 'javascript', 'python'])
+    expect(shell.params[1]).toMatchObject({ kind: 'code', codeLanguageParam: 'language' })
+    expect(shell.params[5]).toMatchObject({ kind: 'number', defaultValue: 30 })
+    const iff = types.find((t: { type: string }) => t.type === 'logic.if')
+    expect(iff.outputs.map((o: { key: string }) => o.key)).toEqual(['true', 'false'])
+    expect(types.find((t: { type: string }) => t.type === 'trigger.manual').outputs).toEqual([{ key: 'main', label: '' }])
+    const ollama = types.find((t: { type: string }) => t.type === 'ai.ollama')
+    expect(ollama.params.find((p: { key: string }) => p.key === 'connection')).toMatchObject({ kind: 'connection', provider: 'ollama' })
+    expect(ollama.params.find((p: { key: string }) => p.key === 'model')).toMatchObject({ kind: 'select', optionsSource: 'ollama.models', optionsDependsOn: 'connection' })
     expect(types.find((t: { type: string }) => t.type === 'trigger.manual').isTrigger).toBe(true)
   })
 

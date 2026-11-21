@@ -8,7 +8,8 @@ public class ProcessRunner : IProcessRunner
 {
     public const int OutputCap = 64 * 1024;
 
-    public async Task<ProcessResult> RunAsync(string command, string workingDirectory, string? stdin, TimeSpan timeout, CancellationToken ct)
+    public async Task<ProcessResult> RunAsync(string command, string workingDirectory, string? stdin, TimeSpan timeout, CancellationToken ct,
+        IReadOnlyDictionary<string, string>? environment = null)
     {
         var psi = new ProcessStartInfo
         {
@@ -20,6 +21,7 @@ public class ProcessRunner : IProcessRunner
             UseShellExecute = false,
             CreateNoWindow = true,
         };
+        if (environment is not null) foreach (var (k, v) in environment) psi.Environment[k] = v;
         psi.ArgumentList.Add(OperatingSystem.IsWindows() ? "/c" : "-c");
         psi.ArgumentList.Add(command);
 

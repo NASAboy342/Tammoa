@@ -13,6 +13,6 @@ public class ManualTriggerCard : ICardType
         "Starts the flow when you press Run. Output: { input } = the value passed with the run.",
         CardCategory.Trigger, "play", []);
 
-    public Task<JToken> ExecuteAsync(CardExecutionContext context, CancellationToken ct) =>
-        Task.FromResult<JToken>(new JObject { ["input"] = context.RunInput?.DeepClone() ?? JValue.CreateNull() });
+    public Task<CardResult> ExecuteAsync(CardExecutionContext context, CancellationToken ct) =>
+        Task.FromResult<CardResult>(new JObject { ["input"] = context.RunInput?.DeepClone() ?? JValue.CreateNull() });
 }

@@ -8,9 +8,9 @@ public interface ICardType
 {
     CardTypeInfo Info { get; }
 
-    /// <summary>Runs the card and returns its output (passed to downstream cards as their input).</summary>
+    /// <summary>Runs the card and returns its output (passed to downstream cards as their input) and, for branching cards, the fired output handle.</summary>
     /// <exception cref="ArgumentException">Bad configuration (shown on the card as its error).</exception>
     /// <exception cref="InvalidOperationException">The work itself failed (shown on the card as its error).</exception>
     /// <exception cref="OperationCanceledException">The run was cancelled.</exception>
-    Task<JToken> ExecuteAsync(CardExecutionContext context, CancellationToken ct);
+    Task<CardResult> ExecuteAsync(CardExecutionContext context, CancellationToken ct);
 }

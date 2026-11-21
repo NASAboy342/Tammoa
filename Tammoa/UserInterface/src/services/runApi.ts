@@ -32,5 +32,9 @@ export const runApi = {
     requestJson<FlowRun>(`/api/flows/${flowId}/runs`, { method: 'POST', body: JSON.stringify({ input }) }),
   listForFlow: (flowId: string) => requestJson<FlowRun[]>(`/api/flows/${flowId}/runs`),
   get: (runId: string) => requestJson<FlowRun>(`/api/runs/${runId}`),
+  /** Deletes one finished run (409 while it is running). */
+  remove: (runId: string) => requestJson<void>(`/api/runs/${runId}`, { method: 'DELETE' }),
+  /** Deletes every finished run of the flow; running ones stay. Returns the removed ids. */
+  clear: (flowId: string) => requestJson<{ deleted: string[] }>(`/api/flows/${flowId}/runs`, { method: 'DELETE' }),
   cancel: (runId: string) => requestJson<FlowRun>(`/api/runs/${runId}/cancel`, { method: 'POST' }),
 }

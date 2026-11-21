@@ -1,3 +1,4 @@
 namespace Tammoa.Enums;
 
-public enum CardCategory { Trigger, Action, Data }
+/// <summary>Groups cards in the palette (in this order).</summary>
+public enum CardCategory { Trigger, Logic, Data, Action, Ai }

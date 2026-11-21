@@ -5,19 +5,23 @@ namespace Tammoa.Services;
 
 public class RunEventBus : IRunEventBus
 {
-    private readonly List<Channel<FlowRun>> _subscribers = new();
+    private readonly List<Channel<RunEvent>> _subscribers = new();
     private readonly object _gate = new();
 
-    public void Publish(FlowRun run)
+    public void Publish(FlowRun run) => Send(RunEvent.Changed(run));
+
+    public void PublishRemoved(string flowId, string runId) => Send(RunEvent.Removed(flowId, runId));
+
+    private void Send(RunEvent e)
     {
-        Channel<FlowRun>[] targets;
+        Channel<RunEvent>[] targets;
         lock (_gate) targets = _subscribers.ToArray();
-        foreach (var c in targets) c.Writer.TryWrite(run);
+        foreach (var c in targets) c.Writer.TryWrite(e);
     }
 
-    public ChannelReader<FlowRun> Subscribe(CancellationToken ct)
+    public ChannelReader<RunEvent> Subscribe(CancellationToken ct)
     {
-        var channel = Channel.CreateBounded<FlowRun>(new BoundedChannelOptions(256) { FullMode = BoundedChannelFullMode.DropOldest, SingleReader = true });
+        var channel = Channel.CreateBounded<RunEvent>(new BoundedChannelOptions(256) { FullMode = BoundedChannelFullMode.DropOldest, SingleReader = true });
         lock (_gate) _subscribers.Add(channel);
         ct.Register(() =>
         {

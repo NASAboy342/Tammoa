@@ -2,10 +2,15 @@
 import { onMounted, onUnmounted } from 'vue'
 import { RouterLink, RouterView } from 'vue-router'
 import AppIcon from '@/components/icons/AppIcon.vue'
+import type { IconName } from '@/components/icons/icons'
 import { useAppStore } from '@/stores/appStore'
 import { useRunStore } from '@/stores/runStore'
 import { useThemeStore } from '@/stores/themeStore'
 
+const nav: { name: string; label: string; icon: IconName }[] = [
+  { name: 'flows', label: 'Flows', icon: 'git-branch' },
+  { name: 'connections', label: 'Connections', icon: 'plug' },
+]
 const theme = useThemeStore()
 const app = useAppStore()
 const runs = useRunStore()
@@ -22,6 +27,18 @@ onUnmounted(() => runs.disconnect())
       <RouterLink :to="{ name: 'flows' }" class="inline-flex items-center gap-2 text-base font-bold tracking-tight" data-testid="brand">
         <AppIcon name="git-branch" :size="22" /> Tammoa
       </RouterLink>
+      <nav class="ml-3 flex items-center gap-1" aria-label="Main">
+        <RouterLink
+          v-for="item in nav"
+          :key="item.name"
+          :to="{ name: item.name }"
+          class="inline-flex min-h-8 items-center gap-1.5 rounded-control border border-transparent px-2.5 text-xs font-semibold text-ink-soft hover:bg-surface-hover hover:text-ink"
+          active-class="!border-ink !text-ink"
+          :data-testid="`nav-${item.name}`"
+        >
+          <AppIcon :name="item.icon" :size="14" /> {{ item.label }}
+        </RouterLink>
+      </nav>
       <span class="flex-1" />
       <span
         class="inline-flex items-center gap-1.5 rounded-md px-2 py-1 text-xs font-semibold"

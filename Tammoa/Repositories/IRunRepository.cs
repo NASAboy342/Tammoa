@@ -8,4 +8,5 @@ public interface IRunRepository
     void Save(FlowRun run);                              // insert or replace by id
     FlowRun? Get(string id);
     IReadOnlyList<FlowRun> ListForFlow(string flowId);   // newest first
+    bool Remove(string id);
 }

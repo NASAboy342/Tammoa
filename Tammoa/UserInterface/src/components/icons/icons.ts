@@ -113,6 +113,24 @@ export const ICONS = {
     ),
   ],
   triangle: [path('M12 3 2 21h20z')],
+  // cards, code, editor chrome
+  code: [poly('16 18 22 12 16 6'), poly('8 6 2 12 8 18')],
+  braces: [
+    path('M8 3H7a2 2 0 0 0-2 2v5a2 2 0 0 1-2 2 2 2 0 0 1 2 2v5a2 2 0 0 0 2 2h1'),
+    path('M16 21h1a2 2 0 0 0 2-2v-5c0-1.1.9-2 2-2a2 2 0 0 1-2-2V5a2 2 0 0 0-2-2h-1'),
+  ],
+  globe: [circle(12, 12, 10), path('M2 12h20'), path('M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z')],
+  split: [path('M16 3h5v5'), path('M8 3H3v5'), path('M12 22v-8.3a4 4 0 0 0-1.172-2.872L3 3'), path('m15 9 6-6')],
+  merge: [path('m8 6 4-4 4 4'), path('M12 2v10.3a4 4 0 0 1-1.172 2.872L4 22'), path('m20 22-5-5')],
+  'file-text': [path('M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z'), poly('14 2 14 8 20 8'), line(16, 13, 8, 13), line(16, 17, 8, 17), line(10, 9, 8, 9)],
+  'file-plus': [path('M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z'), poly('14 2 14 8 20 8'), line(12, 18, 12, 12), line(9, 15, 15, 15)],
+  bot: [rect(3, 11, 18, 10, 2), circle(12, 5, 2), path('M12 7v4'), line(8, 16, 8.01, 16), line(16, 16, 16.01, 16)],
+  maximize: [poly('15 3 21 3 21 9'), poly('9 21 3 21 3 15'), line(21, 3, 14, 10), line(3, 21, 10, 14)],
+  minimize: [poly('4 14 10 14 10 20'), poly('20 10 14 10 14 4'), line(14, 10, 21, 3), line(3, 21, 10, 14)],
+  'grip-vertical': [circle(9, 6, 1), circle(9, 12, 1), circle(9, 18, 1), circle(15, 6, 1), circle(15, 12, 1), circle(15, 18, 1)],
+  search: [circle(11, 11, 8), line(21, 21, 16.65, 16.65)],
+  'chevron-up': [poly('18 15 12 9 6 15')],
+  eraser: [path('m7 21-4.3-4.3c-1-1-1-2.5 0-3.4l9.6-9.6c1-1 2.5-1 3.4 0l5.6 5.6c1 1 1 2.5 0 3.4L13 21'), path('M22 21H7'), path('m5 11 9 9')],
   flag: [path('M4 15s1-1 4-1 5 2 8 2 4-1 4-1V3s-1 1-4 1-5-2-8-2-4 1-4 1z'), line(4, 22, 4, 15)],
 } satisfies Record<string, IconShape[]>
 

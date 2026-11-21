@@ -18,6 +18,8 @@ public class RunRepository : IRunRepository
 
     public FlowRun? Get(string id) => _runs.GetValueOrDefault(id);
 
+    public bool Remove(string id) => _runs.TryRemove(id, out _);
+
     public IReadOnlyList<FlowRun> ListForFlow(string flowId) =>
         _runs.Values.Where(r => r.FlowId == flowId).OrderByDescending(r => r.StartedAt).ToList();
 

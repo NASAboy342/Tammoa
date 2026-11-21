@@ -18,6 +18,12 @@ public static class RunEndpoints
 
         app.MapGet("/api/flows/{id}/runs", (string id) => EndpointHelpers.TrySync(() => JsonHelper.Ok(service.ListForFlow(id))));
         app.MapGet("/api/runs/{id}", (string id) => EndpointHelpers.TrySync(() => JsonHelper.Ok(service.Get(id))));
+        app.MapDelete("/api/runs/{id}", (string id) => EndpointHelpers.TrySync(() =>
+        {
+            service.Delete(id);
+            return Results.NoContent();
+        }));
+        app.MapDelete("/api/flows/{id}/runs", (string id) => EndpointHelpers.TrySync(() => JsonHelper.Ok(new { deleted = service.Clear(id) })));
         app.MapPost("/api/runs/{id}/cancel", (string id) => EndpointHelpers.TrySync(() => JsonHelper.Ok(service.Cancel(id))));
 
         // Server-sent events: every change of any run, as a complete snapshot. The UI only displays what arrives here.
@@ -37,8 +43,11 @@ public static class RunEndpoints
                     try
                     {
                         if (!await reader.WaitToReadAsync(wait.Token)) break;
-                        while (reader.TryRead(out var run))
-                            await ctx.Response.WriteAsync($"event: run\ndata: {JsonHelper.Serialize(run)}\n\n", ctx.RequestAborted);
+                        while (reader.TryRead(out var e))
+                        {
+                            var data = e.Kind == "run" ? JsonHelper.Serialize(e.Run) : JsonHelper.Serialize(new { runId = e.RunId, flowId = e.FlowId });
+                            await ctx.Response.WriteAsync($"event: {e.Kind}\ndata: {data}\n\n", ctx.RequestAborted);
+                        }
                     }
                     catch (OperationCanceledException) when (!ctx.RequestAborted.IsCancellationRequested)
                     {

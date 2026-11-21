@@ -5,6 +5,7 @@ export default createRouter({
   history: createWebHashHistory(),
   routes: [
     { path: '/', name: 'flows', component: () => import('@/views/FlowsView.vue') },
+    { path: '/connections', name: 'connections', component: () => import('@/views/ConnectionsView.vue') },
     { path: '/flows/:id', name: 'flow-edit', component: () => import('@/views/FlowEditView.vue') },
   ],
 })

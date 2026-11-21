@@ -7,12 +7,29 @@ A desktop app for building AI-agent automations from modular **cards** (inspired
 - Flows are stored in a local SQLite file in your user data folder (`~/Library/Application Support/Tammoa` on macOS, `%APPDATA%\Tammoa` on Windows). Set `TAMMOA_DATA_DIR` to use another folder (handy for testing).
 - Flows can be exported/imported as a portable JSON document through the API (`GET /api/flows/{id}/export`, `POST /api/flows/import`); UI buttons come later.
 
+## Cards
+| Card | Use it to |
+|---|---|
+| Manual trigger | start a flow (you can pass text or JSON when you press Run) |
+| IF | split the flow in two (true / false output) |
+| Wait | pause for a while |
+| Set value, JSON, Merge | build, parse, stringify and combine data |
+| Script | run **Shell, JavaScript (needs Node) or Python (needs python3)**; read the input from `$TAMMOA_INPUT` (JSON); print JSON to use it in the next card as `{{input.json.x}}` |
+| HTTP Request | call a web API |
+| Read file, Write file | read or write a text file |
+| Ollama | ask a local or remote Ollama model (create a connection first) |
+
+## Connections (AI models)
+Open **Connections**, add your Ollama address (default `http://localhost:11434`; an API key is optional and only needed behind a proxy), press **Test** to see its models, then pick the connection and a model in an Ollama card. The key is stored in plain text on this computer in a folder only you can open (`~/Library/Application Support/Tammoa`), never shown again and never put in exported flows.
+
 ## Building and running a flow
 1. Open a flow. **Add card** lists the card types: *Manual trigger*, *Script*, *Set value*.
 2. Drag cards where you like, drag from a card's right dot onto another card to connect them, click a card to edit its settings on the right. **Save**.
 3. Type something in *Run input* (text or JSON, optional) and press **Run**. The backend executes the flow; cards show running / succeeded / failed / skipped live, and clicking a card shows its output or error. **Cancel** stops a run. You can start several runs at once, even of the same flow.
 - Data moves from card to card: use `{{input.stdout}}` (the previous card's output) and `{{run.input}}` in card settings. Put values in shell commands with `{{input.text | sh}}` so quotes and spaces cannot break the command.
-- Everything runs in the backend, the window only displays the state. Run history is kept in memory, so it is lost when the app closes. Loops, schedules and model cards are not built yet.
+- Everything runs in the backend, the window only displays the state. Run history is kept in memory (lost when the app closes); **Clear** in the run list removes finished runs, and each flow keeps its newest 50.
+- The side panel can be dragged wider; code and long text open in a larger editor or viewer. Hover shortened names to read them in full.
+- Not built yet: loops, schedule and webhook triggers, OpenAI / Anthropic connections.
 
 ## Vision (mostly not built yet)
 - **Card canvas** with connections, like n8n; flows saved as JSON.
@@ -46,7 +63,7 @@ Use the `stop-test` skill. Ports: 5173, 8000. Process match: `bin/Debug/net8.0/T
 
 ## Tests
 - Backend: `dotnet test`
-- Frontend unit: `npm run test:unit` (in `Tammoa/UserInterface`); e2e: `npx playwright test` (needs both dev servers running; start the backend with `TAMMOA_DATA_DIR=<temp folder>` so tests never touch your real flows)
+- Frontend unit: `npm run test:unit` (in `Tammoa/UserInterface`); e2e: `npx playwright test --project=chromium` (needs both dev servers running; start the backend with `TAMMOA_DATA_DIR=<temp folder>` so tests never touch your real flows or connections) and, for the macOS window's engine, `npx playwright install webkit` once, then `npx playwright test --project=webkit`. Node and python3 should be installed (the script tests use them).
 
 ## Build
 ```bash

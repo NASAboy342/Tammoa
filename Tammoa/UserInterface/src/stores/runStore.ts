@@ -21,6 +21,13 @@ export const useRunStore = defineStore('runs', () => {
     runs.value = { ...runs.value, [run.id]: run }
   }
 
+  function drop(runId: string) {
+    if (!(runId in runs.value)) return
+    const next = { ...runs.value }
+    delete next[runId]
+    runs.value = next
+  }
+
   function forFlow(flowId: string): FlowRun[] {
     return Object.values(runs.value)
       .filter((r) => r.flowId === flowId)
@@ -38,10 +45,14 @@ export const useRunStore = defineStore('runs', () => {
 
   function connect() {
     if (close) return
-    close = connectRunEvents(upsert, () => {
-      connected.value = true
-      if (watchedFlow) void loadForFlow(watchedFlow) // catch up on anything missed while disconnected
-    })
+    close = connectRunEvents(
+      upsert,
+      () => {
+        connected.value = true
+        if (watchedFlow) void loadForFlow(watchedFlow) // catch up on anything missed while disconnected
+      },
+      (removed) => drop(removed.runId),
+    )
   }
 
   function disconnect() {
@@ -62,6 +73,26 @@ export const useRunStore = defineStore('runs', () => {
     }
   }
 
+  /** Deletes all finished runs of a flow. The backend also announces each removal, so other windows follow. */
+  async function clear(flowId: string) {
+    error.value = null
+    try {
+      for (const id of (await runApi.clear(flowId)).deleted) drop(id)
+    } catch (e) {
+      error.value = message(e)
+    }
+  }
+
+  async function remove(runId: string) {
+    error.value = null
+    try {
+      await runApi.remove(runId)
+      drop(runId)
+    } catch (e) {
+      error.value = message(e)
+    }
+  }
+
   async function cancel(runId: string) {
     try {
       upsert(await runApi.cancel(runId))
@@ -70,5 +101,5 @@ export const useRunStore = defineStore('runs', () => {
     }
   }
 
-  return { runs, error, connected, upsert, forFlow, loadForFlow, connect, disconnect, start, cancel }
+  return { runs, error, connected, upsert, drop, forFlow, loadForFlow, connect, disconnect, start, cancel, clear, remove }
 })

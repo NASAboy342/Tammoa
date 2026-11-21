@@ -26,6 +26,15 @@ describe('canvas math', () => {
     expect(outputPort({ x: 10, y: 20 })).toEqual({ x: 10 + NODE_W, y: 20 + NODE_H / 2 })
   })
 
+  it('several output handles are spread evenly down the right edge', () => {
+    const at = { x: 0, y: 0 }
+    expect(outputPort(at, 0, 1).y).toBe(NODE_H / 2)
+    const [a, b] = [outputPort(at, 0, 2), outputPort(at, 1, 2)]
+    expect(a.y).toBeCloseTo(NODE_H / 3)
+    expect(b.y).toBeCloseTo((NODE_H * 2) / 3)
+    expect(a.x).toBe(NODE_W)
+  })
+
   it('edge path starts at the first point and ends at the second, also for back-links', () => {
     expect(edgePath({ x: 0, y: 0 }, { x: 100, y: 50 })).toMatch(/^M 0 0 C .* 100 50$/)
     expect(edgePath({ x: 300, y: 0 }, { x: 0, y: 0 })).toMatch(/^M 300 0 C .* 0 0$/)

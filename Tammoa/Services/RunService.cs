@@ -14,6 +14,8 @@ public class RunService : IRunService
     private readonly IRunRepository _runs;
     private readonly IRunEventBus _bus;
     private readonly TimeProvider _time;
+    public const int MaxRunsPerFlow = 50; // older finished runs are dropped automatically so the log cannot grow without bound
+
     private readonly ConcurrentDictionary<string, CancellationTokenSource> _active = new();
 
     public RunService(IFlowService flows, ICardRegistry cards, IFlowExecutor executor, IRunRepository runs, IRunEventBus bus, TimeProvider time)
@@ -50,6 +52,21 @@ public class RunService : IRunService
 
     public IReadOnlyList<FlowRun> ListForFlow(string flowId) => _runs.ListForFlow(flowId);
 
+    public void Delete(string runId)
+    {
+        var run = Get(runId);
+        if (run.Status == RunStatus.Running) throw new InvalidOperationException("Cancel the run before deleting it.");
+        if (_runs.Remove(runId)) _bus.PublishRemoved(run.FlowId, runId);
+    }
+
+    public IReadOnlyList<string> Clear(string flowId)
+    {
+        var removed = new List<string>();
+        foreach (var run in _runs.ListForFlow(flowId).Where(r => r.Status != RunStatus.Running))
+            if (_runs.Remove(run.Id)) { removed.Add(run.Id); _bus.PublishRemoved(flowId, run.Id); }
+        return removed;
+    }
+
     public FlowRun Cancel(string runId)
     {
         var run = Get(runId);
@@ -73,7 +90,14 @@ public class RunService : IRunService
         {
             _active.TryRemove(initial.Id, out _);
             cts.Dispose();
+            Retain(initial.FlowId);
         }
+    }
+
+    private void Retain(string flowId)
+    {
+        foreach (var old in _runs.ListForFlow(flowId).Where(r => r.Status != RunStatus.Running).Skip(MaxRunsPerFlow))
+            if (_runs.Remove(old.Id)) _bus.PublishRemoved(flowId, old.Id);
     }
 
     private void Publish(FlowRun run)

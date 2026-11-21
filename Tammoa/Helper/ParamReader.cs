@@ -16,6 +16,22 @@ public static class ParamReader
         return int.TryParse((string?)t, out var n) ? n : fallback;
     }
 
+    public static double GetDouble(JObject p, string key, double fallback)
+    {
+        var t = p[key];
+        if (t is null || t.Type == JTokenType.Null) return fallback;
+        if (t.Type is JTokenType.Integer or JTokenType.Float) return (double)t;
+        return double.TryParse((string?)t, System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out var d) ? d : fallback;
+    }
+
+    /// <summary>An optional number: null when the param is missing, null or an empty string.</summary>
+    public static double? GetOptionalDouble(JObject p, string key)
+    {
+        var t = p[key];
+        if (t is null || t.Type == JTokenType.Null || (t.Type == JTokenType.String && string.IsNullOrWhiteSpace((string?)t))) return null;
+        return GetDouble(p, key, double.NaN) is var d && !double.IsNaN(d) ? d : throw new ArgumentException($"'{key}' must be a number.");
+    }
+
     public static bool GetBool(JObject p, string key, bool fallback)
     {
         var t = p[key];

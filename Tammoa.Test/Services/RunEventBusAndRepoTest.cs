@@ -19,11 +19,11 @@ public class RunEventBusAndRepoTest
         var r1 = bus.Subscribe(c1.Token);
         var r2 = bus.Subscribe(c2.Token);
         bus.Publish(Run("a"));
-        Assert.That((await r1.ReadAsync()).Id, Is.EqualTo("a"));
-        Assert.That((await r2.ReadAsync()).Id, Is.EqualTo("a"));
+        Assert.That((await r1.ReadAsync()).RunId, Is.EqualTo("a"));
+        Assert.That((await r2.ReadAsync()).RunId, Is.EqualTo("a"));
         c1.Cancel();
         bus.Publish(Run("b"));
-        Assert.That((await r2.ReadAsync()).Id, Is.EqualTo("b"));
+        Assert.That((await r2.ReadAsync()).RunId, Is.EqualTo("b"));
         Assert.That(await r1.WaitToReadAsync(), Is.False, "cancelled subscriber's channel is completed");
     }
 
@@ -35,7 +35,7 @@ public class RunEventBusAndRepoTest
         var reader = bus.Subscribe(cts.Token);
         for (var i = 0; i < 1000; i++) bus.Publish(Run("r" + i));
         var got = new List<string>();
-        while (reader.TryRead(out var r)) got.Add(r.Id);
+        while (reader.TryRead(out var r)) got.Add(r.RunId!);
         Assert.That(got.Count, Is.EqualTo(256));
         Assert.That(got.Last(), Is.EqualTo("r999"));
     }

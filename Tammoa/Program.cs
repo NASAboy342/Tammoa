@@ -22,6 +22,7 @@ internal static class Program
         var app = PhotinoServer.CreateStaticFileServer(args, out string baseUrl);
         app.Urls.Add("http://localhost:8000");
 
+        DataPaths.RestrictToOwner(DataPaths.DataDir()); // the database holds connection keys
         var services = new ServiceCollection();
         services.AddSingleton<IAppInfoService, AppInfoService>();
         services.AddSingleton(TimeProvider.System);
@@ -31,7 +32,21 @@ internal static class Program
         services.AddSingleton<IProcessRunner, ProcessRunner>();
         services.AddSingleton<ICardType, ManualTriggerCard>();
         services.AddSingleton<ICardType, SetValueCard>();
-        services.AddSingleton<ICardType, ShellScriptCard>();
+        services.AddSingleton<ICardType, ScriptCard>();
+        services.AddSingleton<ICardType, IfCard>();
+        services.AddSingleton<ICardType, WaitCard>();
+        services.AddSingleton<ICardType, HttpRequestCard>();
+        services.AddSingleton<ICardType, JsonCard>();
+        services.AddSingleton<ICardType, MergeCard>();
+        services.AddSingleton<ICardType, ReadFileCard>();
+        services.AddSingleton<ICardType, WriteFileCard>();
+        services.AddSingleton<ICardType, OllamaCard>();
+        services.AddSingleton(_ => new HttpClient(new SocketsHttpHandler { AutomaticDecompression = System.Net.DecompressionMethods.All }) { Timeout = Timeout.InfiniteTimeSpan }); // cards enforce their own timeouts
+        services.AddSingleton<IHttpRequestRunner, HttpRequestRunner>();
+        services.AddSingleton<IOllamaClient, OllamaClient>();
+        services.AddSingleton<IConnectionRepository>(_ => new ConnectionRepository(DataPaths.DatabaseFile()));
+        services.AddSingleton<IConnectionService, ConnectionService>();
+        services.AddSingleton<ICardOptionsService, CardOptionsService>();
         services.AddSingleton<ICardRegistry, CardRegistry>();
         services.AddSingleton<IFlowDefinitionValidator, FlowDefinitionValidator>();
         services.AddSingleton<IFlowExecutor, FlowExecutor>();
@@ -42,7 +57,8 @@ internal static class Program
 
         app.MapAppEndpoints(provider.GetRequiredService<IAppInfoService>());
         app.MapFlowEndpoints(provider.GetRequiredService<IFlowService>());
-        app.MapCardEndpoints(provider.GetRequiredService<ICardRegistry>());
+        app.MapCardEndpoints(provider.GetRequiredService<ICardRegistry>(), provider.GetRequiredService<ICardOptionsService>());
+        app.MapConnectionEndpoints(provider.GetRequiredService<IConnectionService>());
         app.MapRunEndpoints(provider.GetRequiredService<IRunService>(), provider.GetRequiredService<IRunEventBus>());
 
 #if DEBUG

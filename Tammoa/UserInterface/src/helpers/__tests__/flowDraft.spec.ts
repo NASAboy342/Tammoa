@@ -5,13 +5,14 @@ import {
 } from '../flowDraft'
 
 const info = (type: string, isTrigger = false, params: CardTypeInfo['params'] = []): CardTypeInfo => ({
-  type, name: type === 'trigger.manual' ? 'Manual trigger' : 'Script', description: '', category: isTrigger ? 'trigger' : 'action', icon: 'zap', isTrigger, params,
+  type, name: type === 'trigger.manual' ? 'Manual trigger' : 'Script', description: '', category: isTrigger ? 'trigger' : 'action', icon: 'zap', isTrigger, params, outputs: [{ key: 'main', label: '' }],
 })
 const types = { 'trigger.manual': info('trigger.manual', true), 'script.shell': info('script.shell') }
 const node = (id: string, type = 'script.shell') => ({ id, type, name: id, position: { x: 0, y: 0 }, params: {} })
+const e = (id: string, source: string, target: string, sourceHandle = 'main') => ({ id, source, sourceHandle, target })
 const draft = (): Draft => ({
   nodes: [node('t', 'trigger.manual'), node('a'), node('b')],
-  edges: [{ id: 'e1', source: 't', target: 'a' }, { id: 'e2', source: 'a', target: 'b' }],
+  edges: [e('e1', 't', 'a'), e('e2', 'a', 'b')],
 })
 
 describe('toDraft / toDefinition', () => {
@@ -20,6 +21,7 @@ describe('toDraft / toDefinition', () => {
     const d = toDraft({ nodes: [{ id: 'x', type: 'script.shell' }], edges: [{ source: 'x', target: 'y' }] })
     expect(d.nodes[0]).toMatchObject({ id: 'x', name: 'script.shell', position: { x: 0, y: 0 }, params: {} })
     expect(d.edges[0].id).toMatch(/^e-/)
+    expect(d.edges[0].sourceHandle).toBe('main')
   })
 
   it('writes back keeping unknown keys such as schemaVersion', () => {
@@ -103,5 +105,29 @@ describe('freeSpot', () => {
     const many = [0, 1, 2, 3].map((i) => ({ ...node(`n${i}`), position: { x: i * 256, y: 0 } }))
     const wrapped = freeSpot(many, { x: 0, y: 0 })
     expect(wrapped).toEqual({ x: 0, y: 100 })
+  })
+})
+
+describe('output handles', () => {
+  const iff: CardTypeInfo = { ...info('logic.if'), name: 'IF', category: 'logic', outputs: [{ key: 'true', label: 'true' }, { key: 'false', label: 'false' }] }
+  const typesWithIf = { ...types, 'logic.if': iff }
+  const d = (): Draft => ({ nodes: [node('t', 'trigger.manual'), node('i', 'logic.if'), node('a'), node('b')], edges: [e('e1', 't', 'i')] })
+
+  it('reads and keeps the handle a connection leaves from', () => {
+    const back = toDraft(toDefinition(undefined, { nodes: [node('i', 'logic.if'), node('a')], edges: [e('x', 'i', 'a', 'false')] }))
+    expect(back.edges[0].sourceHandle).toBe('false')
+  })
+
+  it('allows a connection from each handle, also to the same target, but not the same handle twice', () => {
+    const draft = d()
+    expect(canConnect(draft, typesWithIf, 'i', 'a', 'true')).toEqual({ ok: true })
+    draft.edges.push(e('e2', 'i', 'a', 'true'))
+    expect(canConnect(draft, typesWithIf, 'i', 'a', 'false')).toEqual({ ok: true })
+    expect(canConnect(draft, typesWithIf, 'i', 'a', 'true')).toMatchObject({ ok: false, reason: 'Already connected.' })
+  })
+
+  it('refuses a handle the card does not have', () => {
+    expect(canConnect(d(), typesWithIf, 'i', 'a', 'maybe')).toMatchObject({ ok: false })
+    expect(canConnect(d(), typesWithIf, 'a', 'b', 'true')).toMatchObject({ ok: false })
   })
 })

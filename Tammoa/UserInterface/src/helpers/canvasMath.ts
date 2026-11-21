@@ -25,7 +25,8 @@ export function zoomAt(v: View, factor: number, anchor: Point): View {
   return { k, x: anchor.x - world.x * k, y: anchor.y - world.y * k }
 }
 
-export const outputPort = (n: Point): Point => ({ x: n.x + NODE_W, y: n.y + NODE_H / 2 })
+/** Output handle `index` of `count`, spread evenly down the right edge (one handle = the middle). */
+export const outputPort = (n: Point, index = 0, count = 1): Point => ({ x: n.x + NODE_W, y: n.y + (NODE_H * (index + 1)) / (count + 1) })
 export const inputPort = (n: Point): Point => ({ x: n.x, y: n.y + NODE_H / 2 })
 
 /** Cubic bezier from an output port to an input port; the pull grows with distance so back-links stay readable. */

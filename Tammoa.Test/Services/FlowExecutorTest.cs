@@ -17,13 +17,13 @@ public class FlowExecutorTest
         public TaskCompletionSource? Gate { get; set; }
         public TaskCompletionSource Started { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
 
-        public async Task<JToken> ExecuteAsync(CardExecutionContext c, CancellationToken ct)
+        public async Task<CardResult> ExecuteAsync(CardExecutionContext c, CancellationToken ct)
         {
             lock (Calls) Calls.Add(c);
             Started.TrySetResult();
             if (Gate is not null) await Gate.Task.WaitAsync(ct);
             if (c.Params["fail"] is not null) throw new InvalidOperationException((string)c.Params["fail"]!);
-            return c.Params["out"]?.DeepClone() ?? new JObject { ["from"] = c.Params["name"] };
+            return new CardResult(c.Params["out"]?.DeepClone() ?? new JObject { ["from"] = c.Params["name"] }, (string?)c.Params["branch"]);
         }
     }
 
@@ -101,6 +101,46 @@ public class FlowExecutorTest
             Assert.That(run.Revision, Is.EqualTo(revisions.Last()));
             Assert.That(revisions.First(), Is.GreaterThan(0));
         }
+    }
+
+    private static string B(string id, string branch) => N(id, "act", $"{{\"name\":\"{id}\",\"branch\":\"{branch}\"}}");
+    private static string EH(string s, string handle, string t) => $"{{\"source\":\"{s}\",\"sourceHandle\":\"{handle}\",\"target\":\"{t}\"}}";
+
+    [Test]
+    public async Task Branching_OnlyTheFiredHandleRuns_TheOtherBranchIsSkipped()
+    {
+        var run = await Run(Def($"[{N("t", "trigger")},{B("if", "true")},{N("yes")},{N("no")}]", $"[{E("t", "if")},{EH("if", "true", "yes")},{EH("if", "false", "no")}]"));
+        Assert.That(S(run, "yes"), Is.EqualTo(NodeRunStatus.Succeeded));
+        Assert.That(S(run, "no"), Is.EqualTo(NodeRunStatus.Skipped));
+        Assert.That(run.Status, Is.EqualTo(RunStatus.Succeeded), "a skipped branch is not a failure");
+    }
+
+    [Test]
+    public async Task Branching_OtherHandle_RunsTheOtherBranch()
+    {
+        var run = await Run(Def($"[{N("t", "trigger")},{B("if", "false")},{N("yes")},{N("no")}]", $"[{E("t", "if")},{EH("if", "true", "yes")},{EH("if", "false", "no")}]"));
+        Assert.That(S(run, "yes"), Is.EqualTo(NodeRunStatus.Skipped));
+        Assert.That(S(run, "no"), Is.EqualTo(NodeRunStatus.Succeeded));
+    }
+
+    [Test]
+    public async Task Branching_BranchesMeetingAgain_RunWithTheSingleActiveInput()
+    {
+        var run = await Run(Def($"[{N("t", "trigger")},{B("if", "true")},{N("yes", p: "{\"name\":\"yes\",\"out\":{\"from\":\"yes\"}}")},{N("no")},{N("join")}]",
+            $"[{E("t", "if")},{EH("if", "true", "yes")},{EH("if", "false", "no")},{E("yes", "join")},{E("no", "join")}]"));
+        Assert.That(S(run, "join"), Is.EqualTo(NodeRunStatus.Succeeded));
+        Assert.That(S(run, "no"), Is.EqualTo(NodeRunStatus.Skipped));
+        var input = _act.Calls.Single(c => (string?)c.Params["name"] == "join").Input!;
+        Assert.That(input, Is.InstanceOf<JObject>(), "one active parent: its output, not an array");
+        Assert.That((string?)input["from"], Is.EqualTo("yes"));
+    }
+
+    [Test]
+    public async Task Branching_AllConnectionsInactive_SkipsTheCard()
+    {
+        var run = await Run(Def($"[{N("t", "trigger")},{B("if", "false")},{N("yes")},{N("after")}]", $"[{E("t", "if")},{EH("if", "true", "yes")},{E("yes", "after")}]"));
+        Assert.That(S(run, "yes"), Is.EqualTo(NodeRunStatus.Skipped));
+        Assert.That(S(run, "after"), Is.EqualTo(NodeRunStatus.Skipped), "skip cascades");
     }
 
     [Test]

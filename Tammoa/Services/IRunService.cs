@@ -16,6 +16,14 @@ public interface IRunService
 
     IReadOnlyList<FlowRun> ListForFlow(string flowId);
 
+    /// <summary>Deletes one finished run from the log.</summary>
+    /// <exception cref="KeyNotFoundException">No such run (404).</exception>
+    /// <exception cref="InvalidOperationException">The run is still running: cancel it first (409).</exception>
+    void Delete(string runId);
+
+    /// <summary>Deletes every finished run of a flow (running ones stay) and returns their ids.</summary>
+    IReadOnlyList<string> Clear(string flowId);
+
     /// <summary>Asks a running run to stop. A finished run is returned unchanged.</summary>
     /// <exception cref="KeyNotFoundException">No such run (404).</exception>
     FlowRun Cancel(string runId);

@@ -2,6 +2,7 @@ import { ref } from 'vue'
 import { defineStore } from 'pinia'
 import { runApi, type FlowRun } from '@/services/runApi'
 import { connectRunEvents } from '@/services/eventsApi'
+import { useDataStore } from './dataStore'
 
 const message = (e: unknown) => (e instanceof Error ? e.message : String(e))
 
@@ -10,6 +11,7 @@ export const useRunStore = defineStore('runs', () => {
   const runs = ref<Record<string, FlowRun>>({})
   const error = ref<string | null>(null)
   const connected = ref(false)
+  const data = useDataStore()
   let watchedFlow: string | null = null
   let close: (() => void) | null = null
 
@@ -52,6 +54,7 @@ export const useRunStore = defineStore('runs', () => {
         if (watchedFlow) void loadForFlow(watchedFlow) // catch up on anything missed while disconnected
       },
       (removed) => drop(removed.runId),
+      (changed) => data.changed(changed.flowId, changed.cardId),
     )
   }
 

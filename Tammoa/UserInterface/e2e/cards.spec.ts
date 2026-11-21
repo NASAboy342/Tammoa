@@ -241,7 +241,7 @@ test.describe('the Ollama card', () => {
 
       const chat = fake.chats().at(-1)!
       expect(chat.authorization).toBe('Bearer sekret')
-      expect(chat.body).toMatchObject({ model: 'tiny:1b', stream: false, think: false, options: { temperature: 0.2 } })
+      expect(chat.body).toMatchObject({ model: 'tiny:1b', stream: true, think: false, options: { temperature: 0.2 } })
       expect(chat.body.messages.at(-1)).toEqual({ role: 'user', content: 'Say: hi' })
       expect(chat.body.format).toBeUndefined()
       await expect(page.locator('body')).not.toContainText('sekret')

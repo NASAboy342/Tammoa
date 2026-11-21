@@ -16,7 +16,7 @@ public class ScriptLanguagesTest
     {
         public string? Command;
         public IReadOnlyDictionary<string, string>? Env;
-        public string? ScriptText, InputFileText, RunInputFileText, WrapperText;
+        public string? ScriptText, InputFileText, RunInputFileText, WrapperText, DataFileText;
         public string? WorkingDirectory;
         public ProcessResult Result = new(0, "ok", "", false, false);
 
@@ -28,6 +28,7 @@ public class ScriptLanguagesTest
             if (environment is not null && environment.TryGetValue("TAMMOA_SCRIPT_FILE", out var script)) ScriptText = File.ReadAllText(script);
             if (environment is not null && environment.TryGetValue("TAMMOA_INPUT_FILE", out var f)) InputFileText = File.ReadAllText(f);
             if (environment is not null && environment.TryGetValue("TAMMOA_RUN_INPUT_FILE", out var r)) RunInputFileText = File.ReadAllText(r);
+            if (environment is not null && environment.TryGetValue("TAMMOA_DATA_FILE", out var d)) DataFileText = File.ReadAllText(d);
             if (System.Text.RegularExpressions.Regex.Match(command, "'([^']+wrapper\\.(?:js|py))'") is { Success: true } w) WrapperText = File.ReadAllText(w.Groups[1].Value);
             return Task.FromResult(Result);
         }
@@ -74,6 +75,36 @@ public class ScriptLanguagesTest
         Assert.That(spy.Command, Does.StartWith(OperatingSystem.IsWindows() ? "python " : "python3 ").And.Contain("wrapper.py"));
         await card.ExecuteAsync(Ctx(Json(new { language = "python", command = "print(1)", interpreter = "/opt/py/bin/python3.12" })), default);
         Assert.That(spy.Command, Does.StartWith("/opt/py/bin/python3.12 '"));
+    }
+
+    [Test]
+    public async Task TheDataCards_AreHandedToTheScript_AsDataInBothLanguages_AndInTheEnvironment()
+    {
+        var (card, spy) = Make();
+        var data = JObject.Parse("{\"Style\":\"Be brief.\",\"Settings\":{\"city\":\"Phnom Penh\"}}");
+        await card.ExecuteAsync(new CardExecutionContext(JObject.Parse(Json(new { language = "javascript", command = "1" })), null, null, data), default);
+        Assert.That(JToken.DeepEquals(JObject.Parse(spy.DataFileText!), data), Is.True);
+        Assert.That(JToken.DeepEquals(JObject.Parse(spy.Env!["TAMMOA_DATA"]), data), Is.True);
+        Assert.That(spy.WrapperText, Does.Contain("globalThis.data = JSON.parse"));
+
+        await card.ExecuteAsync(new CardExecutionContext(JObject.Parse(Json(new { language = "python", command = "1" })), null, null, data), default);
+        Assert.That(spy.WrapperText, Does.Contain("data = json.load").And.Contain("'data': data"));
+    }
+
+    [Test]
+    public async Task WithoutDataCards_DataIsAnEmptyObject_NotMissing()
+    {
+        var (card, spy) = Make();
+        await card.ExecuteAsync(Ctx(Json(new { language = "javascript", command = "1" })), default);
+        Assert.That(spy.DataFileText, Is.EqualTo("{}"));
+    }
+
+    [Test]
+    public async Task Shell_CanUseTheDataCardsAsTemplates()
+    {
+        var (card, spy) = Make();
+        await card.ExecuteAsync(new CardExecutionContext(JObject.Parse(Json(new { language = "shell", command = "echo {{data.Style | sh}} {{data.Settings.city | sh}}" })), null, null, JObject.Parse("{\"Style\":\"Be brief.\",\"Settings\":{\"city\":\"Phnom Penh\"}}")), default);
+        Assert.That(spy.Command, Is.EqualTo("echo 'Be brief.' 'Phnom Penh'"));
     }
 
     [Test]
@@ -198,6 +229,24 @@ public class ScriptRuntimesTest
         if (!Found("python3")) Assert.Ignore("python3 is not installed");
         var ex = Assert.ThrowsAsync<InvalidOperationException>(() => Card.ExecuteAsync(new CardExecutionContext(JObject.Parse(Json(new { language = "python", command = "def (" })), null, null), default));
         Assert.That(ex!.Message, Does.Contain("SyntaxError"));
+    }
+
+    [Test]
+    public async Task Node_AndPython_ReadTheDataCards()
+    {
+        var data = JObject.Parse("{\"Style\":\"Be brief.\",\"Settings\":{\"city\":\"Phnom Penh\"}}");
+        if (Found("node"))
+        {
+            var r = (await Card.ExecuteAsync(new CardExecutionContext(JObject.Parse(Json(new { language = "javascript", command = "console.log(JSON.stringify({ s: data.Style, c: data.Settings.city }))" })), null, null, data), default)).Output;
+            Assert.That((string?)r["json"]!["s"], Is.EqualTo("Be brief."));
+            Assert.That((string?)r["json"]!["c"], Is.EqualTo("Phnom Penh"));
+        }
+        if (Found("python3"))
+        {
+            var r = (await Card.ExecuteAsync(new CardExecutionContext(JObject.Parse(Json(new { language = "python", command = "import json\nprint(json.dumps({'s': data['Style'], 'c': data['Settings']['city']}))" })), null, null, data), default)).Output;
+            Assert.That((string?)r["json"]!["s"], Is.EqualTo("Be brief."));
+            Assert.That((string?)r["json"]!["c"], Is.EqualTo("Phnom Penh"));
+        }
     }
 
     [Test]

@@ -18,6 +18,7 @@ public class FlowServiceTest
     private IFlowRepository _repo = null!;
     private FixedTime _time = null!;
     private IFlowDefinitionValidator _validator = null!;
+    private IDataService _data = null!;
     private FlowService _sut = null!;
 
     [SetUp]
@@ -27,7 +28,9 @@ public class FlowServiceTest
         _repo.Update(Arg.Any<Flow>()).Returns(true);
         _time = new FixedTime(T0);
         _validator = Substitute.For<IFlowDefinitionValidator>();
-        _sut = new FlowService(_repo, _time, _validator);
+        _data = Substitute.For<IDataService>();
+        _data.ExportFlowData(default!, default!).ReturnsForAnyArgs(new JObject());
+        _sut = new FlowService(_repo, _time, _validator, _data);
     }
 
     private static Flow Existing(string name = "Daily report", bool enabled = false, JObject? def = null) =>
@@ -229,6 +232,60 @@ public class FlowServiceTest
     {
         _repo.Get("abc").Returns(Existing(new string('a', FlowService.MaxNameLength)));
         Assert.That(_sut.Duplicate("abc").Name, Has.Length.EqualTo(FlowService.MaxNameLength));
+    }
+
+    // --- the flow's data follows the flow
+    [Test]
+    public void Delete_RemovesTheFlowsStoredData()
+    {
+        _repo.Get("abc").Returns(Existing("Daily report"));
+        _sut.Delete("abc", "Daily report");
+        _data.Received(1).DeleteFlowData("abc");
+    }
+
+    [Test]
+    public void WrongConfirmation_KeepsTheStoredData()
+    {
+        _repo.Get("abc").Returns(Existing("Daily report"));
+        Assert.Throws<ArgumentException>(() => _sut.Delete("abc", "nope"));
+        _data.DidNotReceiveWithAnyArgs().DeleteFlowData(default!);
+    }
+
+    [Test]
+    public void Duplicate_CopiesTheStoredData_ToTheNewFlow()
+    {
+        _repo.Get("abc").Returns(Existing());
+        var copy = _sut.Duplicate("abc");
+        _data.Received(1).CopyFlowData("abc", copy.Id);
+    }
+
+    [Test]
+    public void Export_IncludesTheFlowsOwnData_WhenThereIsSome_AndOmitsTheFieldOtherwise()
+    {
+        _repo.Get("abc").Returns(Existing());
+        _data.ExportFlowData("abc", default!).ReturnsForAnyArgs(JObject.Parse("{\"d1\":\"stored text\"}"));
+        var withData = _sut.Export("abc");
+        Assert.That((string?)withData.Data!["d1"], Is.EqualTo("stored text"));
+        _data.ExportFlowData("abc", default!).ReturnsForAnyArgs(new JObject());
+        var without = _sut.Export("abc");
+        Assert.That(without.Data, Is.Null);
+        Assert.That(Tammoa.Helper.JsonHelper.Serialize(without), Does.Not.Contain("\"data\""));
+    }
+
+    [Test]
+    public void Import_HandsTheDocumentsDataToTheNewFlow()
+    {
+        var data = JObject.Parse("{\"d1\":\"x\"}");
+        var imported = _sut.Import(new FlowDocument("tammoa.flow", 1, "Imported", "", JObject.Parse("{\"nodes\":[],\"edges\":[]}"), data));
+        _data.Received(1).ImportFlowData(imported.Id, Arg.Any<JObject>(), data);
+    }
+
+    [Test]
+    public void ARejectedImport_StoresNoData()
+    {
+        _validator.When(v => v.Validate(Arg.Any<JObject>())).Do(_ => throw new ArgumentException("bad"));
+        Assert.Throws<ArgumentException>(() => _sut.Import(new FlowDocument("tammoa.flow", 1, "x", "", JObject.Parse("{}"), JObject.Parse("{\"d\":\"x\"}"))));
+        _data.DidNotReceiveWithAnyArgs().ImportFlowData(default!, default!, default);
     }
 
     // --- export / import

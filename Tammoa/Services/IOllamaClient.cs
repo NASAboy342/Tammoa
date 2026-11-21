@@ -15,7 +15,9 @@ public interface IOllamaClient
     /// <exception cref="InvalidOperationException">As above.</exception>
     Task<IReadOnlyList<string>> ListModelsAsync(Connection connection, CancellationToken ct);
 
-    /// <summary>One non-streaming chat turn (optional system message + the prompt).</summary>
-    /// <exception cref="InvalidOperationException">As above, an unknown model, or a timeout.</exception>
-    Task<OllamaChatResult> ChatAsync(Connection connection, OllamaChatRequest request, TimeSpan timeout, CancellationToken ct);
+    /// <summary>One chat turn (optional system message + the prompt), STREAMED: <paramref name="onDelta"/> receives the thinking and the answer
+    /// written so far (both complete texts, not pieces) every time the model sends something. <paramref name="timeout"/> is how long the
+    /// model may stay SILENT (it restarts with every piece), so a long but healthy answer is never cut off.</summary>
+    /// <exception cref="InvalidOperationException">As above, an unknown model, an error sent by the server, or silence for longer than the timeout.</exception>
+    Task<OllamaChatResult> ChatAsync(Connection connection, OllamaChatRequest request, TimeSpan timeout, CancellationToken ct, Action<string, string>? onDelta = null);
 }

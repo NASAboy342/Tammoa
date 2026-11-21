@@ -41,6 +41,9 @@ internal static class Program
         services.AddSingleton<ICardType, ReadFileCard>();
         services.AddSingleton<ICardType, WriteFileCard>();
         services.AddSingleton<ICardType, OllamaCard>();
+        services.AddSingleton<ICardType, DataStoreCard>();
+        services.AddSingleton<IDataRepository>(_ => new DataRepository(DataPaths.DataDir()));
+        services.AddSingleton<IDataService, DataService>();
         services.AddSingleton(_ => new HttpClient(new SocketsHttpHandler { AutomaticDecompression = System.Net.DecompressionMethods.All }) { Timeout = Timeout.InfiniteTimeSpan }); // cards enforce their own timeouts
         services.AddSingleton<IHttpRequestRunner, HttpRequestRunner>();
         services.AddSingleton<IOllamaClient, OllamaClient>();
@@ -59,6 +62,7 @@ internal static class Program
         app.MapFlowEndpoints(provider.GetRequiredService<IFlowService>());
         app.MapCardEndpoints(provider.GetRequiredService<ICardRegistry>(), provider.GetRequiredService<ICardOptionsService>());
         app.MapConnectionEndpoints(provider.GetRequiredService<IConnectionService>());
+        app.MapDataEndpoints(provider.GetRequiredService<IDataService>());
         app.MapRunEndpoints(provider.GetRequiredService<IRunService>(), provider.GetRequiredService<IRunEventBus>());
 
 #if DEBUG

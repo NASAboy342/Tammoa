@@ -11,14 +11,16 @@ import type { IconName } from '@/components/icons/icons'
 import IconSelect from '@/components/forms/IconSelect.vue'
 import CodeField from '@/components/forms/CodeField.vue'
 import { cardApi, type CardParamInfo, type ParamOption } from '@/services/cardApi'
+import StoredField from './StoredField.vue'
 import { useConnectionStore } from '@/stores/connectionStore'
 import { editorLanguage } from '@/helpers/layout'
 
-const props = defineProps<{ param: CardParamInfo; modelValue: unknown; values: Record<string, unknown> }>()
+/** `card` is only needed by parameters whose value lives outside the flow (kind "stored"). */
+const props = defineProps<{ param: CardParamInfo; modelValue: unknown; values: Record<string, unknown>; card?: { flowId: string; id: string; name: string; saved: boolean } }>()
 const emit = defineEmits<{ 'update:modelValue': [value: unknown]; 'open-guide': [] }>()
 
 const connections = useConnectionStore()
-const icon: Record<CardParamInfo['kind'], IconName> = { text: 'edit', textarea: 'edit', number: 'hash', bool: 'check', select: 'list', code: 'code', connection: 'plug' }
+const icon: Record<CardParamInfo['kind'], IconName> = { text: 'edit', textarea: 'edit', number: 'hash', bool: 'check', select: 'list', code: 'code', connection: 'plug', stored: 'database' }
 const text = () => (props.modelValue === undefined || props.modelValue === null ? '' : String(props.modelValue))
 const str = () => (typeof props.modelValue === 'string' ? props.modelValue : '')
 const field =
@@ -72,12 +74,14 @@ if (props.param.kind === 'connection' && !connections.connections.length && !con
 
 <template>
   <div class="block" :data-testid="`param-${param.key}`">
-    <span v-if="param.kind !== 'select' && param.kind !== 'connection'" class="mb-1 block text-[11px] font-semibold text-ink-soft">
+    <span v-if="param.kind !== 'select' && param.kind !== 'connection' && param.kind !== 'stored'" class="mb-1 block text-[11px] font-semibold text-ink-soft">
       {{ param.label }}<span v-if="param.required" class="text-muted"> *</span>
     </span>
 
+    <StoredField v-if="param.kind === 'stored' && card" :flow-id="card.flowId" :card-id="card.id" :card-name="card.name" :saved="card.saved" :label="param.label" />
+
     <button
-      v-if="param.kind === 'bool'"
+      v-else-if="param.kind === 'bool'"
       type="button"
       role="switch"
       :aria-checked="modelValue === true"

@@ -8,14 +8,24 @@ export interface Seen {
   body?: any
 }
 
-/** A tiny stand-in for an Ollama server, so the connection and Ollama card flows are tested without a real model. */
-export async function startFakeOllama(options: { key?: string; models?: string[] } = {}) {
+/**
+ * A tiny stand-in for an Ollama server, so the connection and Ollama card flows are tested without a real model.
+ * /api/chat STREAMS (newline-delimited JSON, like the real one). With `hold: true` it sends the first pieces at once and then WAITS
+ * until the test calls release(): that makes "the answer is visible while the model is still writing" deterministic.
+ */
+export async function startFakeOllama(options: { key?: string; models?: string[]; hold?: boolean } = {}) {
   const seen: Seen[] = []
   const models = options.models ?? ['tiny:1b', 'big:70b']
+  let release: () => void = () => {}
+  let released = !options.hold
+  const gate = new Promise<void>((resolve) => (release = () => ((released = true), resolve())))
+  let aborted = 0
+  let finished = 0
+
   const server = http.createServer((req, res) => {
     let raw = ''
     req.on('data', (c) => (raw += c))
-    req.on('end', () => {
+    req.on('end', async () => {
       const body = raw ? JSON.parse(raw) : undefined
       const authorization = req.headers.authorization
       seen.push({ method: req.method ?? '', path: req.url ?? '', authorization, body })
@@ -29,15 +39,25 @@ export async function startFakeOllama(options: { key?: string; models?: string[]
       if (req.url === '/api/chat') {
         if (body.model === 'missing') return send(404, { error: "model 'missing' not found" })
         const user = [...body.messages].reverse().find((m: any) => m.role === 'user')?.content
-        return send(200, {
-          model: body.model,
-          message: { role: 'assistant', content: `fake answer to: ${user}` },
-          done: true,
-          done_reason: 'stop',
-          prompt_eval_count: 4,
-          eval_count: 5,
-          total_duration: 1_234_000_000,
-        })
+        const answer = `fake answer to: ${user}`
+        const words = answer.split(/(?<= )/) // pieces that keep their trailing space
+        const thoughts = body.think === true ? ['Let me think. ', 'The user asks something. ', 'I will answer plainly.'] : []
+        res.writeHead(200, { 'Content-Type': 'application/x-ndjson' })
+        let closed = false
+        res.on('close', () => { if (!res.writableEnded) { closed = true; aborted++ } })
+        const line = (o: unknown) => !closed && res.write(JSON.stringify(o) + '\n')
+        const piece = (message: object) => line({ model: body.model, message: { role: 'assistant', content: '', ...message }, done: false })
+        for (const t of thoughts) piece({ thinking: t })
+        const early = Math.min(2, words.length)
+        for (const w of words.slice(0, early)) piece({ content: w })
+        if (!released) await gate // the model is "still writing": the test looks at the live view now
+        for (const w of words.slice(early)) { piece({ content: w }); await new Promise((r) => setTimeout(r, 5)) }
+        if (!closed) {
+          line({ model: body.model, message: { role: 'assistant', content: '' }, done: true, done_reason: 'stop', prompt_eval_count: 4, eval_count: 5, total_duration: 1_234_000_000 })
+          res.end()
+          finished++
+        }
+        return
       }
       send(404, { error: 'not found' })
     })
@@ -48,6 +68,11 @@ export async function startFakeOllama(options: { key?: string; models?: string[]
     url,
     seen,
     chats: () => seen.filter((s) => s.path === '/api/chat'),
-    close: () => new Promise<void>((resolve) => server.close(() => resolve())),
+    /** Lets a held answer finish. */
+    release: () => release(),
+    /** How many chat streams the client abandoned before they finished (e.g. a cancelled run). */
+    aborted: () => aborted,
+    finished: () => finished,
+    close: () => { release(); return new Promise<void>((resolve) => { server.closeAllConnections?.(); server.close(() => resolve()) }) },
   }
 }

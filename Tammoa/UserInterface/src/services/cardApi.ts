@@ -1,6 +1,6 @@
 import { requestJson } from './httpClient'
 
-export type ParamKind = 'text' | 'textarea' | 'number' | 'bool' | 'select' | 'code' | 'connection'
+export type ParamKind = 'text' | 'textarea' | 'number' | 'bool' | 'select' | 'code' | 'connection' | 'stored'
 export type CardCategory = 'trigger' | 'logic' | 'data' | 'action' | 'ai'
 
 export interface ParamOption {
@@ -50,6 +50,8 @@ export interface GuideExample {
   sampleInput?: unknown
   /** The Run input the example assumes. */
   runInput?: unknown
+  /** The Data cards the example assumes (name -> value). */
+  sampleData?: Record<string, unknown>
   /** What the card then outputs and how the next card can use it. */
   result?: string
 }

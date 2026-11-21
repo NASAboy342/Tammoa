@@ -12,6 +12,9 @@ public interface IRunEventBus
     /// <summary>Tells every UI that a run was deleted.</summary>
     void PublishRemoved(string flowId, string runId);
 
+    /// <summary>Tells every UI that the stored text of a Data card changed.</summary>
+    void PublishDataChanged(string flowId, string cardId);
+
     /// <summary>Subscribes until <paramref name="ct"/> is cancelled.</summary>
     ChannelReader<RunEvent> Subscribe(CancellationToken ct);
 }

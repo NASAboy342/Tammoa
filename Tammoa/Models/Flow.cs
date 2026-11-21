@@ -31,5 +31,5 @@ public record DeleteFlowRequest(string? ConfirmName);
 
 /// <summary>Portable file format for sharing a flow between machines. Contains only what defines the flow:
 /// no id, enabled state or timestamps (machine-specific), and never secrets (cards must reference
-/// credentials by name, not embed API keys).</summary>
-public record FlowDocument(string? Format, int Version, string? Name, string? Description, JObject? Definition);
+/// credentials by name, not embed API keys). <see cref="Data"/> carries the stored text of this flow's own Data cards (cardId -> text) so a flow travels with its data.</summary>
+public record FlowDocument(string? Format, int Version, string? Name, string? Description, JObject? Definition, JObject? Data = null);

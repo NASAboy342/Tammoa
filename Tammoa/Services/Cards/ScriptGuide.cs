@@ -9,9 +9,9 @@ public static class ScriptGuide
 {
     public static readonly IReadOnlyDictionary<string, string> CodeHelp = new Dictionary<string, string>
     {
-        ["shell"] = "Read the input: {{input.stdout | sh}} (a template, filled in before the command runs) or $TAMMOA_INPUT (the whole input as JSON text). Print your result.",
-        ["javascript"] = "Read the input: input.json.name   ·   the Run input: runInput   ·   hand data on: console.log(JSON.stringify({ ok: true }))",
-        ["python"] = "Read the input: input_data[\"json\"][\"name\"]   ·   the Run input: run_input   ·   hand data on: print(json.dumps({\"ok\": True}))",
+        ["shell"] = "Read the input: {{input.stdout | sh}} (a template, filled in before the command runs) or $TAMMOA_INPUT (the whole input as JSON text). A Data card: {{data.Style | sh}}. Print your result.",
+        ["javascript"] = "Read the input: input.json.name   ·   the Run input: runInput   ·   a Data card: data.Settings.city   ·   hand data on: console.log(JSON.stringify({ ok: true }))",
+        ["python"] = "Read the input: input_data[\"json\"][\"name\"]   ·   the Run input: run_input   ·   a Data card: data[\"Settings\"][\"city\"]   ·   hand data on: print(json.dumps({\"ok\": True}))",
     };
 
     public static readonly IReadOnlyDictionary<string, string> CodePlaceholders = new Dictionary<string, string>
@@ -76,6 +76,18 @@ import json
 print(json.dumps({"words": len(str(run_input).split())}))
 """;
 
+    private const string JsData = """
+// 'data' holds all your Data cards: data.Settings.city (a JSON Data card) or data.Style (a text one)
+const city = data.Settings.city
+console.log(JSON.stringify({ message: 'Weather for ' + city }))
+""";
+
+    private const string PyData = """
+import json
+# 'data' holds all your Data cards: data["Settings"]["city"] (a JSON Data card) or data["Style"] (a text one)
+print(json.dumps({"message": "Weather for " + data["Settings"]["city"]}))
+""";
+
     private const string ShTemplate = "echo Hello {{input.json.name | sh}}";
 
     private const string ShEnv = """
@@ -122,6 +134,12 @@ echo "$TAMMOA_INPUT" | wc -c
                 "json { total: 15.0, count: 2 }."),
             new GuideExample("Python: use the Run input", "run_input is what was typed in the Run input box.",
                 Py(PyRunInput), PyRunInput, "python", RunInput: "the quick brown fox", Result: "json { words: 4 }."),
+            new GuideExample("JavaScript: use a Data card", "Data cards (reusable stored text) are in the variable data, by the card's name. No wiring and no trigger needed.",
+                Js(JsData), JsData, "javascript", SampleData: new JObject { ["Settings"] = new JObject { ["city"] = "Phnom Penh" } },
+                Result: "json { message: \"Weather for Phnom Penh\" }. Name a Data card Settings and store {\"city\": \"Phnom Penh\"} in it."),
+            new GuideExample("Python: use a Data card", "The same in Python: data[\"Name\"].",
+                Py(PyData), PyData, "python", SampleData: new JObject { ["Settings"] = new JObject { ["city"] = "Phnom Penh" } },
+                Result: "json { message: \"Weather for Phnom Penh\" }."),
             new GuideExample("Shell: put a value into a command", "{{ }} is filled in BEFORE the command runs. Add | sh so spaces and quotes cannot break it.",
                 Sh(ShTemplate), ShTemplate, "shell", new JObject { ["json"] = new JObject { ["name"] = "Sok Dara" } },
                 "The command that runs is: echo Hello 'Sok Dara'. stdout is \"Hello Sok Dara\\n\"."),
@@ -133,7 +151,7 @@ echo "$TAMMOA_INPUT" | wc -c
                 new JObject { ["stdout"] = "one\ntwo\nthree\n" }, "stdout \"3\" (the number of lines)."),
         ],
         [
-            "Names to remember: JavaScript input and runInput · Python input_data and run_input · Shell $TAMMOA_INPUT and {{input.x | sh}}.",
+            "Names to remember: JavaScript input, runInput and data · Python input_data, run_input and data · Shell $TAMMOA_INPUT and {{input.x | sh}} (and {{data.Name | sh}}).",
             "Hand data to the next card by printing JSON (the last line is used if earlier lines are plain text): the next card reads {{input.json.field}}. Plain text is {{input.stdout}}.",
             "A script with no card connected before it has no input (null). Connect the previous card, run once, and open the Input tab to see the real fields.",
             "JavaScript is CommonJS: use require('fs'), not import. A top-level return is fine. Errors show the line number of YOUR code.",

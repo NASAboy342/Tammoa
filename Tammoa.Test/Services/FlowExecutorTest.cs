@@ -1,4 +1,5 @@
 using Newtonsoft.Json.Linq;
+using NSubstitute;
 using Tammoa.Enums;
 using Tammoa.Models;
 using Tammoa.Services;
@@ -10,16 +11,24 @@ public class FlowExecutorTest
     /// <summary>Scriptable card: records calls, returns its param "out" (or throws "fail"), can block until released.</summary>
     private sealed class FakeCard : ICardType
     {
-        public FakeCard(string type, bool trigger = false) =>
-            Info = new CardTypeInfo(type, type, "", trigger ? CardCategory.Trigger : CardCategory.Action, "zap", []);
+        public FakeCard(string type, bool trigger = false, bool source = false) =>
+            Info = new CardTypeInfo(type, type, "", trigger ? CardCategory.Trigger : CardCategory.Action, "zap", []) { IsSource = source };
         public CardTypeInfo Info { get; }
         public List<CardExecutionContext> Calls { get; } = new();
         public TaskCompletionSource? Gate { get; set; }
+        public Action<JToken>? LateProgress { get; private set; }
         public TaskCompletionSource Started { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
 
         public async Task<CardResult> ExecuteAsync(CardExecutionContext c, CancellationToken ct)
         {
             lock (Calls) Calls.Add(c);
+            if (c.Params["report"] is JArray reports)
+                foreach (var r in reports) c.Progress?.Invoke(new JObject { ["text"] = (string?)r });
+            if (c.Params["spam"] is { } spam)
+            {
+                LateProgress = c.Progress;
+                await Task.WhenAll(Enumerable.Range(0, 4).Select(t => Task.Run(() => { for (var i = 0; i < (int)spam; i++) c.Progress?.Invoke(new JObject { ["text"] = $"t{t}-{i}" }); })));
+            }
             Started.TrySetResult();
             if (Gate is not null) await Gate.Task.WaitAsync(ct);
             if (c.Params["fail"] is not null) throw new InvalidOperationException((string)c.Params["fail"]!);
@@ -37,6 +46,8 @@ public class FlowExecutorTest
     // (a gate left closed by one test once blocked the next).
     private FakeCard _trigger = null!;
     private FakeCard _act = null!;
+    private FakeCard _source = null!;
+    private IDataService _dataService = null!;
     private FlowExecutor _sut = null!;
     private List<FlowRun> _snapshots = null!;
 
@@ -45,8 +56,11 @@ public class FlowExecutorTest
     {
         _trigger = new FakeCard("trigger", trigger: true);
         _act = new FakeCard("act");
+        _source = new FakeCard("src", source: true);
         _snapshots = new List<FlowRun>();
-        _sut = new FlowExecutor(new Registry(_trigger, _act), TimeProvider.System);
+        _dataService = Substitute.For<IDataService>();
+        _dataService.LoadContext(default!, default!).ReturnsForAnyArgs(new JObject());
+        _sut = new FlowExecutor(new Registry(_trigger, _act, _source), TimeProvider.System, _dataService);
     }
 
     private static JObject Def(string nodes, string edges) => JObject.Parse($"{{\"nodes\":{nodes},\"edges\":{edges}}}");
@@ -125,6 +139,169 @@ public class FlowExecutorTest
         var run = await Run(Def($"[{N("t", "trigger")},{B("if", "false")},{N("yes")}]", $"[{E("t", "if")},{EH("if", "true", "yes")}]"));
         Assert.That(S(run, "yes"), Is.EqualTo(NodeRunStatus.Skipped));
         Assert.That(InputOf(run, "yes"), Is.Null);
+    }
+
+    // ---- sources (e.g. the Data card): they need no trigger
+    [Test]
+    public async Task ASource_RunsWithoutATriggerOrAnyConnection_ButAnOrdinaryUnconnectedCardStillDoesNot()
+    {
+        var run = await Run(Def($"[{N("t", "trigger")},{N("d", "src")},{N("loose")}]", "[]"));
+        Assert.That(S(run, "d"), Is.EqualTo(NodeRunStatus.Succeeded));
+        Assert.That(S(run, "loose"), Is.EqualTo(NodeRunStatus.Skipped));
+        Assert.That(InputOf(run, "d"), Is.Null, "a source gets no input");
+    }
+
+    [Test]
+    public async Task ASourceCanFeedACard_AndThatCardRunsWithoutNeedingTheTriggerPath()
+    {
+        var run = await Run(Def($"[{N("d", "src", "{\"name\":\"d\",\"out\":{\"text\":\"stored\"}}")},{N("a")}]", $"[{E("d", "a")}]"));
+        Assert.That(S(run, "a"), Is.EqualTo(NodeRunStatus.Succeeded));
+        Assert.That((string?)InputOf(run, "a")!["text"], Is.EqualTo("stored"));
+    }
+
+    [Test]
+    public async Task ASourceThatIsConnectedInto_WaitsForItsParent_LikeAnyCard()
+    {
+        _act.Gate = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        var runTask = Run(Def($"[{N("t", "trigger")},{N("a")},{N("d", "src")}]", $"[{E("t", "a")},{E("a", "d")}]"));
+        await _act.Started.Task.WaitAsync(TimeSpan.FromSeconds(5));
+        await Task.Delay(100);
+        lock (_source.Calls) Assert.That(_source.Calls, Is.Empty, "not started while its parent still runs");
+        _act.Gate.SetResult();
+        var run = await runTask;
+        Assert.That(S(run, "d"), Is.EqualTo(NodeRunStatus.Succeeded));
+        Assert.That(InputOf(run, "d"), Is.Not.Null, "it received the parent's output");
+    }
+
+    // ---- the Data cards are handed to every card, read when that card starts
+    [Test]
+    public async Task EveryCardGetsTheDataCards_ReadWhenItStarts()
+    {
+        _dataService.LoadContext(default!, default!).ReturnsForAnyArgs(JObject.Parse("{\"x\":1}"), JObject.Parse("{\"x\":2}"));
+        var def = Def($"[{N("t", "trigger")},{N("a")}]", $"[{E("t", "a")}]");
+        await Run(def);
+        Assert.That((int)_trigger.Calls[0].Data!["x"]!, Is.EqualTo(1));
+        Assert.That((int)_act.Calls[0].Data!["x"]!, Is.EqualTo(2), "the second card re-read the data, so it sees what changed since");
+        _dataService.Received(2).LoadContext("f", Arg.Is<JObject>(d => ReferenceEquals(d, def)));
+    }
+
+    [Test]
+    public async Task EachCardKnowsItsFlowItsIdAndItsName()
+    {
+        await Run(Def($"[{{\"id\":\"t\",\"type\":\"trigger\",\"name\":\"  Start  \",\"params\":{{\"name\":\"t\"}}}},{N("a")}]", $"[{E("t", "a")}]"));
+        Assert.That((_trigger.Calls[0].FlowId, _trigger.Calls[0].NodeId, _trigger.Calls[0].NodeName), Is.EqualTo(("f", "t", "Start")));
+        Assert.That(_act.Calls[0].NodeName, Is.EqualTo("act"), "no name set: the card type's name");
+    }
+
+    [Test]
+    public async Task AFailureReadingTheData_FailsThatCardNotTheEngine()
+    {
+        _dataService.LoadContext(default!, default!).ReturnsForAnyArgs<JObject>(_ => throw new IOException("disk gone"));
+        var run = await Run(Def($"[{N("t", "trigger")}]", "[]"));
+        Assert.That(S(run, "t"), Is.EqualTo(NodeRunStatus.Failed));
+        Assert.That(run.Status, Is.EqualTo(RunStatus.Failed));
+    }
+
+    // ---- live progress of running cards
+    private static JToken? LiveOf(FlowRun r, string id) => r.Nodes.Single(n => n.NodeId == id).Live;
+
+    private async Task WaitFor(Func<bool> condition, string what)
+    {
+        var deadline = DateTime.UtcNow.AddSeconds(5);
+        while (!condition() && DateTime.UtcNow < deadline) await Task.Delay(10);
+        Assert.That(condition(), Is.True, $"timed out waiting for: {what}");
+    }
+
+    [Test]
+    public async Task AWorkingCardShowsWhatItHasSoFar_ThenTheLiveTextIsReplacedByTheOutput()
+    {
+        _act.Gate = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        var runTask = Run(Def($"[{N("t", "trigger")},{N("a", p: "{\"name\":\"a\",\"report\":[\"H\",\"He\",\"Hel\"],\"out\":{\"text\":\"Hello\"}}")}]", $"[{E("t", "a")}]"));
+        await WaitFor(() => { lock (_snapshots) return _snapshots.Any(s => (string?)LiveOf(s, "a")?["text"] == "Hel"); }, "the last piece to be flushed");
+        lock (_snapshots)
+        {
+            Assert.That(_snapshots.First(s => LiveOf(s, "a") is not null).Nodes.Single(n => n.NodeId == "a").Status, Is.EqualTo(NodeRunStatus.Running));
+            Assert.That((string?)LiveOf(_snapshots.First(s => LiveOf(s, "a") is not null), "a")!["text"], Is.EqualTo("H"), "the first piece shows at once");
+        }
+        _act.Gate.SetResult();
+        var run = await runTask;
+        Assert.That(LiveOf(run, "a"), Is.Null, "a finished card has no live text any more");
+        Assert.That((string?)run.Nodes.Single(n => n.NodeId == "a").Output!["text"], Is.EqualTo("Hello"));
+        lock (_snapshots) Assert.That(_snapshots.Last().Nodes.All(n => n.Live is null), Is.True);
+    }
+
+    [Test]
+    public async Task LiveUpdatesAreThrottled_ABurstIsNotOneSnapshotPerPiece()
+    {
+        _act.Gate = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        var many = string.Join(",", Enumerable.Range(0, 300).Select(i => $"\"{i}\""));
+        var runTask = Run(Def($"[{N("t", "trigger")},{N("a", p: "{\"name\":\"a\",\"report\":[" + many + "]}")}]", $"[{E("t", "a")}]"));
+        await WaitFor(() => { lock (_snapshots) return _snapshots.Any(s => (string?)LiveOf(s, "a")?["text"] == "299"); }, "the final piece of the burst");
+        _act.Gate.SetResult();
+        await runTask;
+        int liveSnapshots;
+        lock (_snapshots) liveSnapshots = _snapshots.Count(s => LiveOf(s, "a") is not null);
+        Assert.That(liveSnapshots, Is.InRange(2, 6), "first piece at once, the rest coalesced; not 300 snapshots");
+    }
+
+    [Test]
+    public async Task ALateReportFromAFinishedCard_IsIgnored()
+    {
+        var run = await Run(Def($"[{N("t", "trigger")},{N("a", p: "{\"name\":\"a\",\"spam\":1}")}]", $"[{E("t", "a")}]"));
+        int before;
+        lock (_snapshots) before = _snapshots.Count;
+        Assert.DoesNotThrow(() => _act.LateProgress!(new JObject { ["text"] = "too late" }));
+        await Task.Delay(400); // longer than the live interval: a delayed flush must not appear either
+        lock (_snapshots)
+        {
+            Assert.That(_snapshots.Count, Is.EqualTo(before));
+            Assert.That(_snapshots.Last(), Is.SameAs(run));
+        }
+    }
+
+    [Test]
+    public async Task ManyThreadsReportingWhileTheRunFinishes_SnapshotsStayInOrder_AndTheFinalOneIsLast()
+    {
+        var run = await Run(Def($"[{N("t", "trigger")},{N("a", p: "{\"name\":\"a\",\"spam\":400}")},{N("b", p: "{\"name\":\"b\",\"spam\":400}")}]", $"[{E("t", "a")},{E("t", "b")}]"));
+        await Task.Delay(300);
+        lock (_snapshots)
+        {
+            var revisions = _snapshots.Select(s => s.Revision).ToList();
+            Assert.That(revisions, Is.Ordered.Ascending, "the repository and the clients receive snapshots in revision order");
+            Assert.That(revisions.Distinct().Count(), Is.EqualTo(revisions.Count));
+            Assert.That(_snapshots.Last(), Is.SameAs(run));
+            Assert.That(run.Status, Is.EqualTo(RunStatus.Succeeded));
+            Assert.That(run.Nodes.All(n => n.Live is null), Is.True);
+        }
+    }
+
+    [Test]
+    public async Task TwoRunningCardsEachKeepTheirOwnLiveText()
+    {
+        _act.Gate = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        var runTask = Run(Def($"[{N("t", "trigger")},{N("a", p: "{\"name\":\"a\",\"report\":[\"from a\"]}")},{N("b", p: "{\"name\":\"b\",\"report\":[\"from b\"]}")}]", $"[{E("t", "a")},{E("t", "b")}]"));
+        await WaitFor(() => { lock (_snapshots) return _snapshots.Any(s => LiveOf(s, "a") is not null && LiveOf(s, "b") is not null); }, "both cards live at once");
+        lock (_snapshots)
+        {
+            var both = _snapshots.First(s => LiveOf(s, "a") is not null && LiveOf(s, "b") is not null);
+            Assert.That((string?)LiveOf(both, "a")!["text"], Is.EqualTo("from a"));
+            Assert.That((string?)LiveOf(both, "b")!["text"], Is.EqualTo("from b"));
+        }
+        _act.Gate.SetResult();
+        await runTask;
+    }
+
+    [Test]
+    public async Task ACancelledCard_HasNoLiveTextLeft()
+    {
+        _act.Gate = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        using var cts = new CancellationTokenSource();
+        var runTask = Run(Def($"[{N("t", "trigger")},{N("a", p: "{\"name\":\"a\",\"report\":[\"partial\"]}")}]", $"[{E("t", "a")}]"), ct: cts.Token);
+        await WaitFor(() => { lock (_snapshots) return _snapshots.Any(s => LiveOf(s, "a") is not null); }, "live text");
+        cts.Cancel();
+        var run = await runTask;
+        Assert.That(S(run, "a"), Is.EqualTo(NodeRunStatus.Cancelled));
+        Assert.That(LiveOf(run, "a"), Is.Null);
     }
 
     [Test]

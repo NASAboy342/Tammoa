@@ -12,6 +12,8 @@ public class RunEventBus : IRunEventBus
 
     public void PublishRemoved(string flowId, string runId) => Send(RunEvent.Removed(flowId, runId));
 
+    public void PublishDataChanged(string flowId, string cardId) => Send(RunEvent.DataChanged(flowId, cardId));
+
     private void Send(RunEvent e)
     {
         Channel<RunEvent>[] targets;

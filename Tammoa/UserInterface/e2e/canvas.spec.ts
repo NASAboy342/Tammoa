@@ -195,7 +195,7 @@ test.describe('backend contract', () => {
   test('GET /api/cards/types describes the cards and their params', async ({ request }) => {
     const types = await (await request.get('/api/cards/types')).json()
     expect(types.map((t: { type: string }) => t.type).sort()).toEqual([
-      'ai.ollama', 'data.json', 'data.merge', 'data.set', 'file.read', 'file.write', 'flow.wait', 'logic.if', 'net.http', 'script.shell', 'trigger.manual',
+      'ai.ollama', 'data.json', 'data.merge', 'data.set', 'data.store', 'file.read', 'file.write', 'flow.wait', 'logic.if', 'net.http', 'script.shell', 'trigger.manual',
     ])
     const shell = types.find((t: { type: string }) => t.type === 'script.shell')
     expect(shell.params.map((p: { key: string }) => p.key)).toEqual(['language', 'command', 'interpreter', 'workingDirectory', 'stdin', 'timeoutSeconds', 'failOnError'])

@@ -33,19 +33,25 @@ public class OllamaClientTest
         Assert.That(stub.Seen[0].Request.Headers.Authorization, Is.Null);
     }
 
+    private static string Lines(params object[] objects) => string.Join("\n", objects.Select(o => JObject.FromObject(o).ToString(Newtonsoft.Json.Formatting.None))) + "\n";
+
+    private static StubHandler Stream(string ndjson) =>
+        new((_, _) => Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK) { Content = new StringContent(ndjson, System.Text.Encoding.UTF8, "application/x-ndjson") }));
+
     [Test]
-    public async Task Chat_SendsMessagesOptionsFormatAndThink_AndReadsTheAnswer()
+    public async Task Chat_StreamsMessagesOptionsFormatAndThink_AndAssemblesTheAnswer()
     {
-        var stub = StubHandler.Json("""
-            { "model": "qwen3:14b", "message": { "role": "assistant", "content": "Hi!", "thinking": "hmm" }, "done": true, "done_reason": "stop",
-              "total_duration": 2500000000, "prompt_eval_count": 12, "eval_count": 3 }
-            """);
+        var stub = Stream(Lines(
+            new { model = "qwen3:14b", message = new { role = "assistant", content = "", thinking = "hm" }, done = false },
+            new { model = "qwen3:14b", message = new { role = "assistant", content = "Hi", thinking = "m" }, done = false },
+            new { model = "qwen3:14b", message = new { role = "assistant", content = "!" }, done = false },
+            new { model = "qwen3:14b", message = new { role = "assistant", content = "" }, done = true, done_reason = "stop", total_duration = 2500000000L, prompt_eval_count = 12, eval_count = 3 }));
         var r = await new OllamaClient(new HttpClient(stub)).ChatAsync(Conn(),
             new OllamaChatRequest("qwen3:14b", "be brief", "hello", 0.2, 64, true, false), TimeSpan.FromSeconds(30), default);
 
         var sent = JObject.Parse(stub.Seen[0].Body);
         Assert.That(stub.Seen[0].Request.RequestUri!.AbsolutePath, Is.EqualTo("/api/chat"));
-        Assert.That((bool)sent["stream"]!, Is.False);
+        Assert.That((bool)sent["stream"]!, Is.True, "the answer is streamed");
         Assert.That(sent["messages"]!.Select(m => (string?)m["role"]), Is.EqualTo(new[] { "system", "user" }));
         Assert.That((string?)sent["messages"]![1]!["content"], Is.EqualTo("hello"));
         Assert.That((double)sent["options"]!["temperature"]!, Is.EqualTo(0.2));
@@ -55,15 +61,94 @@ public class OllamaClientTest
 
         Assert.That(r.Text, Is.EqualTo("Hi!"));
         Assert.That(r.Thinking, Is.EqualTo("hmm"));
+        Assert.That(r.Done, Is.True);
+        Assert.That(r.DoneReason, Is.EqualTo("stop"));
         Assert.That(r.PromptTokens, Is.EqualTo(12));
         Assert.That(r.ResponseTokens, Is.EqualTo(3));
         Assert.That(r.TotalDurationMs, Is.EqualTo(2500));
     }
 
     [Test]
+    public async Task Chat_CallsOnDeltaWithTheGrowingTexts()
+    {
+        var stub = Stream(Lines(
+            new { message = new { content = "", thinking = "Think" }, done = false },
+            new { message = new { content = "", thinking = "ing" }, done = false },
+            new { message = new { content = "Ans" }, done = false },
+            new { message = new { content = "wer" }, done = false },
+            new { message = new { content = "" }, done = true }));
+        var seen = new List<(string Thinking, string Text)>();
+        await new OllamaClient(new HttpClient(stub)).ChatAsync(Conn(), new OllamaChatRequest("m", null, "p", null, null, false, null), TimeSpan.FromSeconds(5), default, (t, a) => seen.Add((t, a)));
+        Assert.That(seen, Is.EqualTo(new[] { ("Think", ""), ("Thinking", ""), ("Thinking", "Ans"), ("Thinking", "Answer"), ("Thinking", "Answer") }));
+    }
+
+    [Test]
+    public async Task Chat_DeliversEachPieceAsItArrives_NotAfterTheWholeAnswer()
+    {
+        var pipe = new System.IO.Pipelines.Pipe();
+        var stub = new StubHandler((_, _) => Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK) { Content = new StreamContent(pipe.Reader.AsStream()) }));
+        var firstSeen = new TaskCompletionSource<string>(TaskCreationOptions.RunContinuationsAsynchronously);
+        var chat = new OllamaClient(new HttpClient(stub)).ChatAsync(Conn(), new OllamaChatRequest("m", null, "p", null, null, false, null), TimeSpan.FromSeconds(10), default,
+            (_, text) => firstSeen.TrySetResult(text));
+
+        async Task Send(string line) { await pipe.Writer.WriteAsync(System.Text.Encoding.UTF8.GetBytes(line + "\n")); }
+        await Send("{\"message\":{\"content\":\"Hel\"},\"done\":false}");
+        var early = await firstSeen.Task.WaitAsync(TimeSpan.FromSeconds(5)); // seen while the server has NOT finished the answer
+        Assert.That(chat.IsCompleted, Is.False, "the call is still running while the first piece is already delivered");
+        Assert.That(early, Is.EqualTo("Hel"));
+
+        await Send("{\"message\":{\"content\":\"lo\"},\"done\":false}");
+        await Send("{\"message\":{\"content\":\"\"},\"done\":true,\"done_reason\":\"stop\"}");
+        await pipe.Writer.CompleteAsync();
+        Assert.That((await chat).Text, Is.EqualTo("Hello"));
+    }
+
+    [Test]
+    public void Chat_AnErrorSentInTheStream_IsReported()
+    {
+        var stub = Stream(Lines(new { message = new { content = "Par" }, done = false }, new { error = "model runner crashed" }));
+        var ex = Assert.ThrowsAsync<InvalidOperationException>(() => new OllamaClient(new HttpClient(stub)).ChatAsync(Conn(), new OllamaChatRequest("m", null, "p", null, null, false, null), TimeSpan.FromSeconds(5), default));
+        Assert.That(ex!.Message, Does.Contain("model runner crashed"));
+    }
+
+    [Test]
+    public async Task Chat_AStreamThatEndsWithoutDone_ReturnsWhatArrivedAndSaysItIsNotDone()
+    {
+        var stub = Stream(Lines(new { message = new { content = "cut o" }, done = false }));
+        var r = await new OllamaClient(new HttpClient(stub)).ChatAsync(Conn(), new OllamaChatRequest("m", null, "p", null, null, false, null), TimeSpan.FromSeconds(5), default);
+        Assert.That(r.Text, Is.EqualTo("cut o"));
+        Assert.That(r.Done, Is.False);
+    }
+
+    [Test]
+    public async Task Chat_TheTimeoutIsSilence_ALongAnswerThatKeepsComingIsNotCutOff()
+    {
+        var pipe = new System.IO.Pipelines.Pipe();
+        var stub = new StubHandler((_, _) => Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK) { Content = new StreamContent(pipe.Reader.AsStream()) }));
+        var chat = new OllamaClient(new HttpClient(stub)).ChatAsync(Conn(), new OllamaChatRequest("m", null, "p", null, null, false, null), TimeSpan.FromMilliseconds(400), default);
+        for (var i = 0; i < 6; i++) // 6 x 150 ms = 900 ms in total, more than the 400 ms timeout, but never silent for 400 ms
+        {
+            await pipe.Writer.WriteAsync(System.Text.Encoding.UTF8.GetBytes("{\"message\":{\"content\":\"x\"},\"done\":false}\n"));
+            await Task.Delay(150);
+        }
+        await pipe.Writer.WriteAsync(System.Text.Encoding.UTF8.GetBytes("{\"message\":{\"content\":\"\"},\"done\":true}\n"));
+        await pipe.Writer.CompleteAsync();
+        Assert.That((await chat).Text, Is.EqualTo("xxxxxx"));
+    }
+
+    [Test]
+    public void Chat_CancellingStopsTheStream()
+    {
+        var pipe = new System.IO.Pipelines.Pipe();
+        var stub = new StubHandler((_, _) => Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK) { Content = new StreamContent(pipe.Reader.AsStream()) }));
+        using var cts = new CancellationTokenSource(150);
+        Assert.CatchAsync<OperationCanceledException>(() => new OllamaClient(new HttpClient(stub)).ChatAsync(Conn(), new OllamaChatRequest("m", null, "p", null, null, false, null), TimeSpan.FromSeconds(30), cts.Token));
+    }
+
+    [Test]
     public async Task Chat_OmitsWhatWasNotSet()
     {
-        var stub = StubHandler.Json("{\"message\":{\"content\":\"x\"}}");
+        var stub = Stream(Lines(new { message = new { content = "x" }, done = true }));
         await new OllamaClient(new HttpClient(stub)).ChatAsync(Conn(), new OllamaChatRequest("m", null, "p", null, null, false, null), TimeSpan.FromSeconds(5), default);
         var sent = JObject.Parse(stub.Seen[0].Body);
         Assert.That(sent["messages"]!.Count(), Is.EqualTo(1));
@@ -111,7 +196,7 @@ public class OllamaClientTest
         var slow = new StubHandler(async (_, ct) => { await Task.Delay(Timeout.Infinite, ct); return new HttpResponseMessage(); });
         var client = new OllamaClient(new HttpClient(slow));
         var ex = Assert.ThrowsAsync<InvalidOperationException>(() => client.ChatAsync(Conn(), new OllamaChatRequest("m", null, "p", null, null, false, null), TimeSpan.FromMilliseconds(150), default));
-        Assert.That(ex!.Message, Does.Contain("did not answer within"));
+        Assert.That(ex!.Message, Does.Contain("was silent for"));
         using var cts = new CancellationTokenSource(100);
         Assert.CatchAsync<OperationCanceledException>(() => client.ChatAsync(Conn(), new OllamaChatRequest("m", null, "p", null, null, false, null), TimeSpan.FromSeconds(30), cts.Token));
     }

@@ -45,7 +45,12 @@ public static class RunEndpoints
                         if (!await reader.WaitToReadAsync(wait.Token)) break;
                         while (reader.TryRead(out var e))
                         {
-                            var data = e.Kind == "run" ? JsonHelper.Serialize(e.Run) : JsonHelper.Serialize(new { runId = e.RunId, flowId = e.FlowId });
+                            var data = e.Kind switch
+                            {
+                                "run" => JsonHelper.Serialize(e.Run),
+                                "run-removed" => JsonHelper.Serialize(new { runId = e.RunId, flowId = e.FlowId }),
+                                _ => JsonHelper.Serialize(new { flowId = e.FlowId, cardId = e.CardId }), // data-changed
+                            };
                             await ctx.Response.WriteAsync($"event: {e.Kind}\ndata: {data}\n\n", ctx.RequestAborted);
                         }
                     }

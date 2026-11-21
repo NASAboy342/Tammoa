@@ -52,6 +52,17 @@ public class FlowDefinitionValidator : IFlowDefinitionValidator
                 throw new ArgumentException($"Card '{id}': position must be {{ x, y }} numbers.");
         }
 
+        // A Data card is referred to by its name ({{data.Name}}): the name must be usable in a reference and unique in the flow.
+        var dataNames = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        foreach (var node in nodes.OfType<JObject>().Where(n => (string?)n["type"] == Cards.DataStoreCard.TypeId))
+        {
+            var name = ((string?)node["name"])?.Trim();
+            if (Helper.DataNames.Problem(name) is { } problem) throw new ArgumentException(problem);
+            if (!dataNames.Add(name!)) throw new ArgumentException($"Two Data cards are called '{name}'. Each needs its own name.");
+            if (node["params"] is JObject p && p["scope"] is { Type: not JTokenType.Null } scope && !Models.DataScope.IsValid((string?)scope))
+                throw new ArgumentException($"Data card '{name}': unknown scope.");
+        }
+
         var links = new HashSet<(string, string, string)>();
         var children = ids.ToDictionary(i => i, _ => new List<string>());
         foreach (var token in edges)

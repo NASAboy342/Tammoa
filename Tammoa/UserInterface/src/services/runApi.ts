@@ -12,6 +12,13 @@ export interface NodeRun {
   error?: string
   /** What the card received (absent for a trigger and for cards that did not run). */
   input?: unknown
+  /** What a RUNNING card has produced so far (e.g. the answer an AI model is still writing). Gone when the card finishes. */
+  live?: LiveOutput
+}
+
+export interface LiveOutput {
+  text?: string
+  thinking?: string
 }
 
 /** A complete snapshot of a run. The backend owns the state; the UI only displays snapshots. */

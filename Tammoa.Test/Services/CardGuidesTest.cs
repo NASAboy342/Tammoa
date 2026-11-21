@@ -13,11 +13,17 @@ public class CardGuidesTest
 {
     private static readonly TemplateEngine T = new();
 
+    private static readonly string DataDir = Path.Combine(Path.GetTempPath(), "tammoa-guide-data-" + Guid.NewGuid().ToString("N"));
+    private static readonly DataService Data = new(new Tammoa.Repositories.DataRepository(DataDir), Substitute.For<Tammoa.Repositories.IFlowRepository>(), Substitute.For<IRunEventBus>());
+
+    [OneTimeTearDown]
+    public void Cleanup() { if (Directory.Exists(DataDir)) Directory.Delete(DataDir, true); }
+
     private static ICardType[] AllCards() =>
     [
         new ManualTriggerCard(), new SetValueCard(T), new ScriptCard(T, new ProcessRunner()), new IfCard(T), new WaitCard(),
         new HttpRequestCard(T, Substitute.For<IHttpRequestRunner>()), new JsonCard(T), new MergeCard(), new ReadFileCard(T), new WriteFileCard(T),
-        new OllamaCard(T, Substitute.For<IConnectionService>(), Substitute.For<IOllamaClient>()),
+        new OllamaCard(T, Substitute.For<IConnectionService>(), Substitute.For<IOllamaClient>()), new DataStoreCard(T, Data),
     ];
 
     private static bool Found(string exe)
@@ -101,7 +107,7 @@ public class CardGuidesTest
 
     // ---- the examples are TRUE: run them
     private static CardExecutionContext ContextFor(GuideExample ex, JObject? settings = null) =>
-        new(settings ?? (ex.Params is null ? new JObject() : (JObject)ex.Params.DeepClone()), ex.SampleInput?.DeepClone(), ex.RunInput?.DeepClone());
+        new(settings ?? (ex.Params is null ? new JObject() : (JObject)ex.Params.DeepClone()), ex.SampleInput?.DeepClone(), ex.RunInput?.DeepClone(), (JObject?)ex.SampleData?.DeepClone());
 
     [Test]
     public async Task EveryScriptExample_RunsAndDoesWhatItSays()
@@ -129,6 +135,9 @@ public class CardGuidesTest
                     Assert.That((double)r["json"]!["total"]!, Is.EqualTo(15)); Assert.That((int)r["json"]!["count"]!, Is.EqualTo(2)); break;
                 case "Python: use the Run input":
                     Assert.That((int)r["json"]!["words"]!, Is.EqualTo(4)); break;
+                case "JavaScript: use a Data card":
+                case "Python: use a Data card":
+                    Assert.That((string?)r["json"]!["message"], Is.EqualTo("Weather for Phnom Penh"), ex.Title); break;
                 case "Shell: put a value into a command":
                     Assert.That(((string?)r["stdout"])!.Trim(), Is.EqualTo("Hello Sok Dara")); break;
                 case "Shell: the whole input as JSON text":
@@ -218,5 +227,67 @@ public class CardGuidesTest
             Assert.That(((JObject)got).Properties().Select(p => p.Name), Is.EquivalentTo(((JObject)read.Info.Guide!.OutputExample!).Properties().Select(p => p.Name)));
         }
         finally { File.Delete(file); }
+    }
+}
+
+public class DataCardGuideTest
+{
+    private static readonly TemplateEngine T = new();
+    private string _dir = null!;
+    private DataService _data = null!;
+    private DataStoreCard _card = null!;
+
+    [SetUp]
+    public void SetUp()
+    {
+        _dir = Path.Combine(Path.GetTempPath(), "tammoa-dataguide-" + Guid.NewGuid().ToString("N"));
+        _data = new DataService(new Tammoa.Repositories.DataRepository(_dir), Substitute.For<Tammoa.Repositories.IFlowRepository>(), Substitute.For<IRunEventBus>());
+        _card = new DataStoreCard(T, _data);
+    }
+
+    [TearDown]
+    public void TearDown() { if (Directory.Exists(_dir)) Directory.Delete(_dir, true); }
+
+    private CardExecutionContext Ctx(GuideExample ex, string name, JObject? input = null) =>
+        new((JObject)ex.Params!.DeepClone(), input ?? (JObject?)ex.SampleInput, ex.RunInput, null, null, "f", "card1", name);
+
+    [Test]
+    public async Task RememberTheLastAnswer_ReplacesWithTheTemplate()
+    {
+        var ex = _card.Info.Guide!.Examples.Single(e => e.Title == "Remember the last answer");
+        var r = (await _card.ExecuteAsync(Ctx(ex, "Last answer"), default)).Output;
+        Assert.That((string?)r["text"], Is.EqualTo("Two files were found."));
+        Assert.That((bool)r["changed"]!, Is.True);
+    }
+
+    [Test]
+    public async Task KeepALog_AppendsALineEachRun()
+    {
+        var ex = _card.Info.Guide!.Examples.Single(e => e.Title == "Keep a log");
+        await _card.ExecuteAsync(Ctx(ex, "Log"), default);
+        var r = (await _card.ExecuteAsync(Ctx(ex, "Log"), default)).Output;
+        Assert.That((string?)r["text"], Is.EqualTo("checked at noon\nchecked at noon"));
+    }
+
+    [Test]
+    public void TheKeepExamples_AreHonestAboutTheirSampleData()
+    {
+        foreach (var ex in _card.Info.Guide!.Examples.Where(e => (string?)e.Params?["mode"] == "keep"))
+        {
+            Assert.That(ex.SampleData, Is.Not.Null, ex.Title);
+            var name = ((JObject)ex.SampleData!).Properties().Single().Name;
+            var value = ex.SampleData![name]!;
+            // what the example claims {{data.<name>}} is must be what a card with that stored text really gets
+            var text = value is JValue v ? (string)v! : value.ToString(Newtonsoft.Json.Formatting.None);
+            Assert.That(JToken.DeepEquals(_data.ToValue(text), value), Is.True, ex.Title);
+        }
+    }
+
+    [Test]
+    public void EveryExample_UsesRealSettingsOfTheCard()
+    {
+        foreach (var ex in _card.Info.Guide!.Examples.Where(e => e.Params is not null))
+            foreach (var p in ex.Params!.Properties())
+                Assert.That(_card.Info.Params.Select(x => x.Key), Does.Contain(p.Name), ex.Title);
     }
 }

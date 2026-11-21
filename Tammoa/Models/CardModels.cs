@@ -37,6 +37,10 @@ public record CardTypeInfo(
 
     public bool IsTrigger => Category == CardCategory.Trigger;
 
+    /// <summary>A source runs at the start of a run even with nothing connected to it and without being a trigger (e.g. the Data card).
+    /// A flow still needs a trigger to start.</summary>
+    public bool IsSource { get; init; }
+
     /// <summary>Output handles, in display order. Edges start from one of them (default "main").</summary>
     public IReadOnlyList<CardOutputInfo> Outputs { get; init; } = MainOutput;
 
@@ -55,7 +59,9 @@ public record GuideExample(
     string? Language = null,
     JToken? SampleInput = null,
     string? Result = null,
-    JToken? RunInput = null);
+    JToken? RunInput = null,
+    /// <summary>The Data cards the example assumes: name -> value (only for the examples' sake).</summary>
+    JObject? SampleData = null);
 
 /// <summary>A card's tutorial. <see cref="OutputExample"/> doubles as the "fields this card will provide" shown to the card connected after it,
 /// before anything has run.</summary>
@@ -75,12 +81,21 @@ public record CardResult(JToken Output, string? Branch = null)
 
 /// <summary>What a card receives when it runs. <see cref="Input"/> is the output of the active parent(s)
 /// (null for a trigger; an array of outputs when several connections are active).</summary>
-public record CardExecutionContext(JObject Params, JToken? Input, JToken? RunInput)
+public record CardExecutionContext(
+    JObject Params,
+    JToken? Input,
+    JToken? RunInput,
+    JObject? Data = null,                 // the Data cards of the flow: name -> value (text, or parsed JSON), read when this card started
+    Action<JToken>? Progress = null,      // report what the card has produced so far (shown live, throttled by the engine)
+    string? FlowId = null,
+    string? NodeId = null,
+    string? NodeName = null)
 {
-    /// <summary>The object that {{ templates }} are resolved against: { input, run: { input } }.</summary>
+    /// <summary>The object that {{ templates }} are resolved against: { input, run: { input }, data: { Name: value } }.</summary>
     public JObject TemplateContext => new()
     {
         ["input"] = Input?.DeepClone() ?? JValue.CreateNull(),
         ["run"] = new JObject { ["input"] = RunInput?.DeepClone() ?? JValue.CreateNull() },
+        ["data"] = Data?.DeepClone() ?? new JObject(),
     };
 }

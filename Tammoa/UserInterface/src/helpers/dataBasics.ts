@@ -1,5 +1,5 @@
 /** The short "how data moves between cards" lesson shown in the Input tab and the guides. Generic: nothing here is about one card. */
-export const DATA_BASICS: { icon: 'arrow-right' | 'edit' | 'zap' | 'code'; title: string; text: string; example: string }[] = [
+export const DATA_BASICS: { icon: 'arrow-right' | 'edit' | 'zap' | 'code' | 'database'; title: string; text: string; example: string }[] = [
   {
     icon: 'arrow-right',
     title: 'Each card receives the output of the card before it',
@@ -23,5 +23,11 @@ export const DATA_BASICS: { icon: 'arrow-right' | 'edit' | 'zap' | 'code'; title
     title: 'In JavaScript and Python code use the ready-made variables',
     text: 'JavaScript: input and runInput. Python: input_data and run_input. Shell: $TAMMOA_INPUT.',
     example: 'input.json.name   ·   input_data["json"]["name"]',
+  },
+  {
+    icon: 'database',
+    title: 'A Data card keeps reusable text, readable from any card without a trigger',
+    text: 'Name the card, store text in it, and read it by its name. JSON text also gives its fields.',
+    example: '{{data.Style}}   ·   {{data.Settings.city}}   ·   JavaScript: data.Style',
   },
 ]

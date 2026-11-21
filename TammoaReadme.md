@@ -19,6 +19,17 @@ A desktop app for building AI-agent automations from modular **cards** (inspired
 | Read file, Write file | read or write a text file |
 | Ollama | ask a local or remote Ollama model (create a connection first) |
 
+## Reusable data: the Data card
+Need a piece of text that many cards use (a style guide, settings, a template) **without** triggering anything? Add a **Data** card.
+1. Name it (the name is how you refer to it, for example `Style`), save the flow once, then type the text in the card and press **Save text**. It is stored as a plain `.txt` file (the path is shown in the card).
+2. **Any card can read it by name**, without a wire: `{{data.Style}}` in prompts, URLs, JSON and shell commands; in **JavaScript** `data.Style`, in **Python** `data["Style"]`. If the text is JSON (`{"city":"Phnom Penh"}`) its fields work too: `{{data.Settings.city}}`.
+3. **A flow can write to it:** connect a card into the Data card, choose *Replace* or *Add as a new line* and what to save (for example `{{input.text}}`). The default is *Keep*, so connecting never overwrites your text by accident. Cards after it in the same run already see the new text.
+4. *Shared with: All flows* makes every flow with a Data card of the same name use the same text. Names: unique in the flow, no `. [ ] | { }`.
+5. It follows its flow: deleting a flow deletes its texts, duplicating copies them, export/import carries them (shared texts stay on your computer). The Input tab of every card lists the Data cards with a copy button.
+
+## Watching the AI write
+Select an Ollama card and press Run: its **Thinking** (if the model thinks) and its **Answer** appear live at the top of the card's panel, in any tab, and the final output replaces them when it is done. Cancel stops the model. The card's timeout is now *"stop if silent for N seconds"*, so long answers are fine.
+
 ## Using data from another card (read this first)
 1. **Run once.** Then click a card and open its **Input** tab: it lists every field the card received, with its type and a preview. The **copy** button next to a field copies the exact reference, e.g. `{{input.json.name}}`.
 2. **Paste it into a setting** (a prompt, URL, file path, JSON, shell command): it is replaced by the value when the card runs. `{{run.input}}` is what you typed in *Run input*, available in every card.
@@ -36,7 +47,7 @@ Open **Connections**, add your Ollama address (default `http://localhost:11434`;
 - Data moves from card to card: use `{{input.stdout}}` (the previous card's output) and `{{run.input}}` in card settings. Put values in shell commands with `{{input.text | sh}}` so quotes and spaces cannot break the command.
 - Everything runs in the backend, the window only displays the state. Run history is kept in memory (lost when the app closes); **Clear** in the run list removes finished runs, and each flow keeps its newest 50.
 - The side panel can be dragged wider; code and long text open in a larger editor or viewer. Hover shortened names to read them in full.
-- Not built yet: loops, schedule and webhook triggers, OpenAI / Anthropic connections.
+- Not built yet: loops, schedule and webhook triggers, OpenAI / Anthropic connections, an agent loop with tool calling.
 
 ## Vision (mostly not built yet)
 - **Card canvas** with connections, like n8n; flows saved as JSON.

@@ -214,7 +214,7 @@ test.describe('the backend keeps what each card received', () => {
 test.describe('Guide tab: a tutorial for every card', () => {
   test('every card type has a guide with its overview, an output example and examples', async ({ page, request }) => {
     const types = (await (await request.get('/api/cards/types')).json()) as { type: string; name: string; guide: { overview: string; inputNote: string; examples: { title: string; params?: unknown }[]; tips?: string[] } }[]
-    expect(types).toHaveLength(11)
+    expect(types).toHaveLength(12)
     const nodes = types.map((t, i) => card(`c${i}`, t.type, {}, (i % 4) * 230, Math.floor(i / 4) * 90, t.name))
     const flow = await makeFlow(request, nodes)
     await open(page, flow.id)
@@ -239,8 +239,8 @@ test.describe('Guide tab: a tutorial for every card', () => {
     await expect(page.getByTestId('guide-basics')).toHaveCount(0)
     await page.getByTestId('guide-basics-toggle').click()
     const basics = page.getByTestId('guide-basics')
-    await expect(basics.locator('li')).toHaveCount(4)
-    for (const text of ['{{input.json.name}}', '{{run.input}}', 'input_data', 'runInput']) await expect(basics).toContainText(text)
+    await expect(basics.locator('li')).toHaveCount(5)
+    for (const text of ['{{input.json.name}}', '{{run.input}}', 'input_data', 'runInput', '{{data.Style}}']) await expect(basics).toContainText(text)
   })
 
   test('an example shows the input it assumes, as fields you can read, and what the card then outputs', async ({ page, request }) => {

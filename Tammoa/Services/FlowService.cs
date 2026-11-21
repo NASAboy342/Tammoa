@@ -17,12 +17,14 @@ public class FlowService : IFlowService
     private readonly IFlowRepository _repository;
     private readonly TimeProvider _time;
     private readonly IFlowDefinitionValidator _validator;
+    private readonly IDataService _data;
 
-    public FlowService(IFlowRepository repository, TimeProvider time, IFlowDefinitionValidator validator)
+    public FlowService(IFlowRepository repository, TimeProvider time, IFlowDefinitionValidator validator, IDataService data)
     {
         _repository = repository;
         _time = time;
         _validator = validator;
+        _data = data;
     }
 
     public IReadOnlyList<FlowSummary> List() =>
@@ -66,6 +68,7 @@ public class FlowService : IFlowService
         if (string.IsNullOrEmpty(confirmName) || !string.Equals(confirmName, existing.Name, StringComparison.Ordinal))
             throw new ArgumentException("Type the exact flow name to confirm deletion.");
         _repository.Delete(id);
+        _data.DeleteFlowData(id); // the flow's Data cards go with it
     }
 
     public Flow SetEnabled(string id, bool enabled)
@@ -95,13 +98,15 @@ public class FlowService : IFlowService
             UpdatedAt = now,
         };
         _repository.Insert(copy);
+        _data.CopyFlowData(source.Id, copy.Id); // a copy starts with the same stored text
         return copy;
     }
 
     public FlowDocument Export(string id)
     {
         var f = Get(id);
-        return new FlowDocument(DocumentFormat, DocumentVersion, f.Name, f.Description, (JObject)f.Definition.DeepClone());
+        var data = _data.ExportFlowData(f.Id, f.Definition);
+        return new FlowDocument(DocumentFormat, DocumentVersion, f.Name, f.Description, (JObject)f.Definition.DeepClone(), data.HasValues ? data : null);
     }
 
     public Flow Import(FlowDocument document)
@@ -119,6 +124,7 @@ public class FlowService : IFlowService
             ValidDefinition(document.Definition ?? EmptyDefinition()),
             now, now);
         _repository.Insert(flow);
+        _data.ImportFlowData(flow.Id, flow.Definition, document.Data);
         return flow;
     }
 

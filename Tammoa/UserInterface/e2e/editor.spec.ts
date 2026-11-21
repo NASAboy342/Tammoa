@@ -340,7 +340,7 @@ test.describe('palette: groups and search', () => {
     await open(page, flow.id)
     await page.getByTestId('palette-toggle').click()
     for (const g of ['trigger', 'logic', 'data', 'action', 'ai']) await expect(page.getByTestId(`palette-group-${g}`)).toBeVisible()
-    await expect(page.locator('[data-testid^="palette-item-"]')).toHaveCount(11)
+    await expect(page.locator('[data-testid^="palette-item-"]')).toHaveCount(12)
     await expect(page.getByTestId('palette-search')).toBeFocused()
 
     await page.getByTestId('palette-search').fill('olla')

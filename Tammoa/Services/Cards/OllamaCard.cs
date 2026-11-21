@@ -23,7 +23,7 @@ public class OllamaCard : ICardType
 
     public CardTypeInfo Info { get; } = new(
         TypeId, "Ollama",
-        "Asks an Ollama model (local or on a server). Output: { text, thinking?, model, promptTokens, responseTokens, totalDurationMs, json? }.",
+        "Asks an Ollama model (local or on a server) and shows its thinking and answer live while it writes. Output: { text, thinking?, model, promptTokens, responseTokens, totalDurationMs, json? }.",
         CardCategory.Ai, "bot",
         [
             new CardParamInfo("connection", "Connection", ParamKind.Connection, Required: true, Provider: ConnectionProvider.Ollama, Help: "Create one under Connections."),
@@ -35,7 +35,7 @@ public class OllamaCard : ICardType
             new CardParamInfo("jsonMode", "Answer as JSON", ParamKind.Bool, DefaultValue: false, Help: "Asks the model for valid JSON; it is also returned as { json }."),
             new CardParamInfo("think", "Reasoning (think)", ParamKind.Select, DefaultValue: "auto",
                 Options: [new("auto", "Auto (model default)"), new("on", "On"), new("off", "Off")], Help: "For reasoning models such as qwen3. Off is faster; auto sends nothing."),
-            new CardParamInfo("timeoutSeconds", "Timeout (seconds)", ParamKind.Number, DefaultValue: 120, Help: "1 to 1800. Small local models can be slow on the first call."),
+            new CardParamInfo("timeoutSeconds", "Stop if silent for (seconds)", ParamKind.Number, DefaultValue: 120, Help: "1 to 1800. The card stops when the model sends nothing for this long (a long answer that keeps coming is never cut off). The first call can be slow while the model loads."),
         ])
     {
         Guide = new CardGuide(
@@ -50,6 +50,10 @@ public class OllamaCard : ICardType
                     new JObject { ["prompt"] = "Return JSON like {\"sentiment\": \"positive\" or \"negative\"} for this review:\n{{run.input}}", ["jsonMode"] = true, ["temperature"] = 0, ["think"] = "off" },
                     "Return JSON like {\"sentiment\": \"positive\" or \"negative\"} for this review:\n{{run.input}}", "text", RunInput: "Great product, fast delivery",
                     Result: "The answer is also parsed: the next card reads {{input.json.sentiment}} (e.g. use an IF card on it)."),
+                new GuideExample("Reuse a style guide stored in a Data card", "Keep the instructions in ONE Data card (name it Style) and use it in every AI card: change the text once, every card follows.",
+                    new JObject { ["system"] = "{{data.Style}}", ["prompt"] = "{{input.stdout}}", ["think"] = "off" },
+                    "System prompt: {{data.Style}}\nPrompt: {{input.stdout}}", "text", new JObject { ["stdout"] = "Release notes for version 2" }, SampleData: new JObject { ["Style"] = "Be brief and friendly." },
+                    Result: "The model gets \"Be brief and friendly.\" as its system prompt. No wiring to the Data card is needed."),
                 new GuideExample("Give the model a role", "A system prompt sets the style for every answer.",
                     new JObject { ["system"] = "You are a terse assistant. Answer in one sentence.", ["prompt"] = "{{run.input}}", ["think"] = "off" },
                     "System: You are a terse assistant. Answer in one sentence.\nPrompt: {{run.input}}", "text", RunInput: "Why is the sky blue?", Result: "A one-sentence answer in {{input.text}}."),
@@ -85,7 +89,14 @@ public class OllamaCard : ICardType
 
         var result = await _ollama.ChatAsync(connection,
             new OllamaChatRequest(model, system, prompt, temperature, maxTokens is { } m ? (int)m : null, jsonMode, think),
-            TimeSpan.FromSeconds(seconds), ct);
+            TimeSpan.FromSeconds(seconds), ct,
+            (thinkingSoFar, textSoFar) =>
+            {
+                // what the model has written so far: the engine shows it live and replaces it with the final output
+                var live = new JObject { ["text"] = textSoFar };
+                if (thinkingSoFar.Length > 0) live["thinking"] = thinkingSoFar;
+                context.Progress?.Invoke(live);
+            });
 
         var output = new JObject { ["text"] = result.Text, ["model"] = result.Model, ["done"] = result.Done };
         if (result.Thinking is not null) output["thinking"] = result.Thinking;

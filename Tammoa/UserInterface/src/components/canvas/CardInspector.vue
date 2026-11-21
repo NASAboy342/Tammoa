@@ -24,6 +24,8 @@ import ParamField from './ParamField.vue'
 import DataView from './DataView.vue'
 import FieldExplorer from './FieldExplorer.vue'
 import GuidePanel from './GuidePanel.vue'
+import LiveOutput from './LiveOutput.vue'
+import DataCardsPanel from './DataCardsPanel.vue'
 
 export type InspectorTab = 'settings' | 'input' | 'output' | 'guide'
 
@@ -40,6 +42,11 @@ const props = defineProps<{
   incoming: { name: string; info?: CardTypeInfo }[]
   tab: InspectorTab
   now?: number
+  flowId: string
+  /** Is this card already in the saved flow? (A Data card needs that before its text can be stored.) */
+  saved: boolean
+  /** Changes when the flow was saved, so the list of Data cards refreshes. */
+  savedKey?: unknown
 }>()
 const emit = defineEmits<{ rename: [name: string]; param: [key: string, value: unknown]; remove: []; 'update:tab': [tab: InspectorTab]; apply: [example: GuideExample] }>()
 
@@ -85,6 +92,8 @@ const hasData = (id: InspectorTab) => (id === 'input' ? realInput.value !== unde
         <AppIcon name="alert" :size="13" class="mt-0.5 shrink-0" />
         <ExpandableText :text="run.error" :lines="4" strong />
       </div>
+      <!-- what a running card has produced so far (an AI model's thinking and answer), visible in every tab -->
+      <LiveOutput v-if="run.status === 'running' && run.live" :live="run.live" />
     </div>
 
     <div class="flex gap-1 border-b border-line" role="tablist" aria-label="Card details">
@@ -107,7 +116,16 @@ const hasData = (id: InspectorTab) => (id === 'input' ? realInput.value !== unde
     <!-- SETTINGS -->
     <div v-if="tab === 'settings'" class="space-y-3" role="tabpanel" data-testid="panel-settings">
       <IconField :model-value="node.name" label="Card name" icon="edit" :maxlength="100" testid="inspector-name" @update:model-value="emit('rename', $event)" />
-      <ParamField v-for="p in info?.params ?? []" :key="p.key" :param="p" :model-value="values[p.key]" :values="values" @update:model-value="emit('param', p.key, $event)" @open-guide="emit('update:tab', 'guide')" />
+      <ParamField
+        v-for="p in info?.params ?? []"
+        :key="p.key"
+        :param="p"
+        :model-value="values[p.key]"
+        :values="values"
+        :card="{ flowId, id: node.id, name: node.name, saved }"
+        @update:model-value="emit('param', p.key, $event)"
+        @open-guide="emit('update:tab', 'guide')"
+      />
     </div>
 
     <!-- INPUT -->
@@ -133,6 +151,8 @@ const hasData = (id: InspectorTab) => (id === 'input' ? realInput.value !== unde
           <AppIcon name="info" :size="13" class="mt-0.5 shrink-0" /> Nothing is connected to this card yet. Drag from the dot on the right of another card onto this one, then run the flow to see its input here.
         </p>
       </section>
+
+      <DataCardsPanel :flow-id="flowId" :refresh-key="savedKey" />
 
       <section data-testid="input-run">
         <h3 class="mb-1 flex items-center gap-1.5 text-[11px] font-semibold uppercase tracking-widest text-muted"><AppIcon name="zap" :size="12" /> Run input <span class="font-normal normal-case tracking-normal">(available in every card)</span></h3>

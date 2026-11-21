@@ -111,6 +111,8 @@ const selectedNode = computed(() => (selection.value?.kind === 'node' ? draft.no
 const selectedNodeRun = computed(() => activeRun.value?.nodes.find((n) => n.nodeId === selectedNode.value?.id))
 // the data tabs show the selected run's data for this card, or else the newest run in which it actually ran
 const nodeData = computed(() => (selectedNode.value ? pickNodeRun(flowRuns.value, activeRun.value?.id ?? null, selectedNode.value.id) : null))
+// a Data card keeps its text through the backend, which looks the card up in the SAVED flow
+const savedIds = computed(() => new Set(((flow.value?.definition.nodes ?? []) as { id: string }[]).map((n) => n.id)))
 const inspectorRunInput = computed(() => nodeData.value?.run.input ?? activeRun.value?.input)
 const inspectorTab = ref<InspectorTab>('settings') // remembered while you click from card to card
 const incoming = computed(() =>
@@ -369,6 +371,9 @@ const inputCls =
             :incoming="incoming"
             v-model:tab="inspectorTab"
             :now="now"
+            :flow-id="id"
+            :saved="savedIds.has(selectedNode.id)"
+            :saved-key="flow?.updatedAt"
             @apply="applyExample"
             @rename="selectedNode.name = $event"
             @param="setParam"

@@ -1,5 +1,6 @@
 import { expect, test, type Page } from '@playwright/test'
-import { card, edge, makeFlow, node, open, trigger } from './helpers'
+import { card, edge, makeFlow, node, open, setCode, trigger } from './helpers'
+import { startFakeOllama } from './fake-ollama'
 
 /**
  * Runs in WebKit (the macOS desktop window is a WKWebView; Windows uses WebView2/Chromium).
@@ -110,6 +111,39 @@ test('Input, Output and Guide tabs, the field list and the example snippets rend
   await expect(page.getByTestId('guide-example')).not.toHaveCount(0)
   await expect(page.getByTestId('guide-example').first().locator('.cm-content')).toContainText('const name = input.json.name')
   await page.screenshot({ path: 'test-results/webkit-guide-tab.png' })
+})
+
+test('the AI card streams its thinking and answer live in WebKit (server-sent events + the live panel)', async ({ page, request }) => {
+  const fake = await startFakeOllama({ hold: true })
+  try {
+    const conn = await (await request.post('/api/connections', { data: { name: `WebKit ${Date.now()}`, provider: 'ollama', baseUrl: fake.url } })).json()
+    const flow = await makeFlow(request, [trigger(), card('ai', 'ai.ollama', { connection: conn.id, model: 'tiny:1b', prompt: 'Say hi', think: 'on' }, 280, 0, 'Ask')], [edge('t', 'ai')])
+    await open(page, flow.id)
+    await node(page, 'ai').click()
+    await page.getByTestId('run').click()
+    await expect(node(page, 'ai')).toHaveAttribute('data-status', 'running')
+    await expect(page.getByTestId('live-thinking')).toContainText('Let me think.')
+    await expect(page.getByTestId('live-text')).toContainText('fake answer')
+    await page.screenshot({ path: 'test-results/webkit-live.png' })
+    fake.release()
+    await expect(node(page, 'ai')).toHaveAttribute('data-status', 'succeeded')
+    await expect(page.getByTestId('inspector-live')).toHaveCount(0)
+  } finally {
+    await fake.close()
+  }
+})
+
+test('the Data card: stored-text editor, saving, and a run that writes it, render and work in WebKit', async ({ page, request }) => {
+  const flow = await makeFlow(request, [trigger(), card('say', 'script.shell', { command: 'echo written-by-run' }, 280, 0), card('d', 'data.store', { mode: 'replace', writeFrom: '{{input.stdout}}' }, 560, 0, 'Notes')], [edge('t', 'say'), edge('say', 'd')])
+  await open(page, flow.id)
+  await node(page, 'd').click()
+  await setCode(page, 'stored-editor', 'typed in WebKit')
+  await page.getByTestId('stored-save').click()
+  await expect(page.getByTestId('stored-saved')).toBeVisible()
+  expect((await (await request.get(`/api/flows/${flow.id}/data/d`)).json()).text).toBe('typed in WebKit')
+  await page.getByTestId('run').click()
+  await expect(page.getByTestId('stored-editor').locator('.cm-content')).toContainText('written-by-run') // pushed to the open editor
+  await page.screenshot({ path: 'test-results/webkit-data-card.png' })
 })
 
 test('live run state arrives over server-sent events in WebKit', async ({ page, request }) => {

@@ -40,7 +40,7 @@ public class OllamaCardTest
 
         await _client.Received(1).ChatAsync(Arg.Is<Connection>(c => c.Id == "c1"),
             Arg.Is<OllamaChatRequest>(q => q.Model == "qwen3:14b" && q.Prompt == "Summarise the news for me" && q.System == "Be brief" && q.Temperature == 0.3 && q.MaxTokens == 100 && q.Think == false && !q.JsonMode),
-            TimeSpan.FromSeconds(9), Arg.Any<CancellationToken>());
+            TimeSpan.FromSeconds(9), Arg.Any<CancellationToken>(), Arg.Any<Action<string, string>?>());
         Assert.That((string?)r["text"], Is.EqualTo("Hello"));
         Assert.That((int)r["promptTokens"]!, Is.EqualTo(5));
         Assert.That((double)r["totalDurationMs"]!, Is.EqualTo(120.5));
@@ -54,14 +54,14 @@ public class OllamaCardTest
     public async Task Think_MapsToNullableBool(string think, bool? expected)
     {
         await _sut.ExecuteAsync(Ctx(new { connection = "c1", model = "m", prompt = "p", think }), default);
-        await _client.Received(1).ChatAsync(Arg.Any<Connection>(), Arg.Is<OllamaChatRequest>(q => q.Think == expected), Arg.Any<TimeSpan>(), Arg.Any<CancellationToken>());
+        await _client.Received(1).ChatAsync(Arg.Any<Connection>(), Arg.Is<OllamaChatRequest>(q => q.Think == expected), Arg.Any<TimeSpan>(), Arg.Any<CancellationToken>(), Arg.Any<Action<string, string>?>());
     }
 
     [Test]
     public async Task OptionalNumbersLeftEmpty_AreNotSent()
     {
         await _sut.ExecuteAsync(Ctx(new { connection = "c1", model = "m", prompt = "p", temperature = "", maxTokens = (string?)null }), default);
-        await _client.Received(1).ChatAsync(Arg.Any<Connection>(), Arg.Is<OllamaChatRequest>(q => q.Temperature == null && q.MaxTokens == null), Arg.Any<TimeSpan>(), Arg.Any<CancellationToken>());
+        await _client.Received(1).ChatAsync(Arg.Any<Connection>(), Arg.Is<OllamaChatRequest>(q => q.Temperature == null && q.MaxTokens == null), Arg.Any<TimeSpan>(), Arg.Any<CancellationToken>(), Arg.Any<Action<string, string>?>());
     }
 
     [Test]
@@ -112,6 +112,36 @@ public class OllamaCardTest
         _client.ChatAsync(default!, default!, default, default).ReturnsForAnyArgs<Task<OllamaChatResult>>(_ => throw new InvalidOperationException("Could not reach Ollama at http://x"));
         var ex = Assert.ThrowsAsync<InvalidOperationException>(() => _sut.ExecuteAsync(Ctx(new { connection = "c1", model = "m", prompt = "p" }), default));
         Assert.That(ex!.Message, Does.Contain("Could not reach Ollama"));
+    }
+
+    [Test]
+    public async Task WhileTheModelWrites_TheCardReportsWhatItHasSoFar_ForTheLiveView()
+    {
+        var reports = new List<JToken>();
+        _client.ChatAsync(default!, default!, default, default, default).ReturnsForAnyArgs(ci =>
+        {
+            var onDelta = ci.Arg<Action<string, string>?>()!;
+            onDelta("", "Hel");
+            onDelta("Let me think", "Hello");
+            onDelta("Let me think. Greet.", "Hello there");
+            return Task.FromResult(new OllamaChatResult("Hello there", "Let me think. Greet.", "m", true, "stop", 1, 2, 3));
+        });
+        var context = new CardExecutionContext(JObject.Parse(Json(new { connection = "c1", model = "m", prompt = "p" })), null, null, Progress: reports.Add);
+
+        var result = (await _sut.ExecuteAsync(context, default)).Output;
+
+        Assert.That(reports.Select(r => (string?)r["text"]), Is.EqualTo(new[] { "Hel", "Hello", "Hello there" }));
+        Assert.That(reports[0]["thinking"], Is.Null, "no thinking field until the model starts thinking");
+        Assert.That((string?)reports[1]["thinking"], Is.EqualTo("Let me think"));
+        Assert.That((string?)result["thinking"], Is.EqualTo("Let me think. Greet."), "the final output keeps the thinking");
+    }
+
+    [Test]
+    public async Task WithoutAProgressCallback_TheCardStillWorks()
+    {
+        _client.ChatAsync(default!, default!, default, default, default).ReturnsForAnyArgs(ci => { ci.Arg<Action<string, string>?>()?.Invoke("", "x"); return Task.FromResult(new OllamaChatResult("x", null, "m", true, null, null, null, null)); });
+        var r = (await _sut.ExecuteAsync(Ctx(new { connection = "c1", model = "m", prompt = "p" }), default)).Output;
+        Assert.That((string?)r["text"], Is.EqualTo("x"));
     }
 
     [Test]

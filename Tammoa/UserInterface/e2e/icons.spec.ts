@@ -1,5 +1,6 @@
 import { expect, test, type Page } from '@playwright/test'
-import { openTab, showJson } from './helpers'
+import { openTab, setCode, showJson } from './helpers'
+import { startFakeOllama } from './fake-ollama'
 
 /**
  * Icon audit — house rule: every clickable thing has an icon.
@@ -176,6 +177,47 @@ test('input / output tabs, the guide with examples, the code hint: every clickab
   expect(await withoutIcon(page), 'Guide tab with two examples open').toEqual([])
   for (const id of ['inspector-tab-settings', 'inspector-tab-input', 'inspector-tab-output', 'inspector-tab-guide']) {
     expect(await page.getByTestId(id).locator('svg[data-icon]').count(), id).toBeGreaterThanOrEqual(1) // tabs carry icons too
+  }
+})
+
+test('live AI output and the Data card (stored text, data list, change notice): every clickable has an icon', async ({ page, request }) => {
+  const fake = await startFakeOllama({ hold: true })
+  try {
+    const conn = await (await request.post('/api/connections', { data: { name: `Live ${Date.now()}`, provider: 'ollama', baseUrl: fake.url } })).json()
+    const flow = await (await request.post('/api/flows', { data: { name: `LiveData ${Date.now()}`, description: '' } })).json()
+    const nodes = [
+      { id: 't', type: 'trigger.manual', name: 'Start', position: { x: 0, y: 0 }, params: {} },
+      { id: 'ai', type: 'ai.ollama', name: 'Ask', position: { x: 260, y: 0 }, params: { connection: conn.id, model: 'tiny:1b', prompt: 'hi', think: 'on' } },
+      { id: 'style', type: 'data.store', name: 'Style', position: { x: 0, y: 140 }, params: {} },
+      { id: 'cfg', type: 'data.store', name: 'Settings', position: { x: 260, y: 140 }, params: {} },
+    ]
+    await request.put(`/api/flows/${flow.id}`, { data: { name: flow.name, description: '', definition: { nodes, edges: [{ id: 'e1', source: 't', target: 'ai' }] } } })
+    await request.put(`/api/flows/${flow.id}/data/cfg`, { data: { text: '{"city":"Phnom Penh"}' } })
+    await page.goto(`/#/flows/${flow.id}`)
+    await expect(page.getByTestId('node-ai')).toBeVisible()
+
+    await page.getByTestId('node-ai').click()
+    await page.getByTestId('run').click()
+    await expect(page.getByTestId('live-text')).toContainText('fake answer')
+    expect(await withoutIcon(page), 'the live view while the model writes (thinking toggle)').toEqual([])
+    fake.release()
+    await expect(page.getByTestId('node-ai')).toHaveAttribute('data-status', 'succeeded')
+
+    await page.getByTestId('node-style').click()
+    await expect(page.getByTestId('stored-editor')).toBeVisible()
+    expect(await withoutIcon(page), 'Data card: stored text editor, Save text, Revert, copy reference, copy path').toEqual([])
+    await setCode(page, 'stored-editor', 'unsaved words')
+    await request.put(`/api/flows/${flow.id}/data/style`, { data: { text: 'changed elsewhere' } })
+    await expect(page.getByTestId('stored-changed-elsewhere')).toBeVisible()
+    expect(await withoutIcon(page), 'Data card: "changed elsewhere" notice with its Load button').toEqual([])
+
+    await openTab(page, 'input')
+    await expect(page.getByTestId('data-cards')).toBeVisible()
+    await page.getByTestId('data-card-cfg').getByTestId('data-card-fields').click()
+    await expect(page.getByTestId('data-card-explorer')).toBeVisible()
+    expect(await withoutIcon(page), 'Data in this flow, with a JSON card opened').toEqual([])
+  } finally {
+    await fake.close()
   }
 })
 

@@ -10,8 +10,9 @@ namespace Tammoa.Services.Cards;
 /// Reading the input:
 ///  - JavaScript: the variables <c>input</c> (the card input) and <c>runInput</c> (the value passed with the run) are ready to use.
 ///  - Python: <c>input_data</c> and <c>run_input</c> (the built-in <c>input()</c> is left alone).
-///  - Every language: env TAMMOA_INPUT / TAMMOA_RUN_INPUT (JSON text, set when at most 64 KB) and TAMMOA_INPUT_FILE / TAMMOA_RUN_INPUT_FILE
-///    (paths of temp files with the JSON, always set). Shell code can also use {{ }} templates.
+///  - JavaScript and Python also get <c>data</c>: the Data cards of the flow (name -> text, or parsed JSON).
+///  - Every language: env TAMMOA_INPUT / TAMMOA_RUN_INPUT / TAMMOA_DATA (JSON text, set when at most 64 KB) and TAMMOA_INPUT_FILE /
+///    TAMMOA_RUN_INPUT_FILE / TAMMOA_DATA_FILE (paths of temp files with the JSON, always set). Shell code can also use {{ }} templates.
 /// JS and Python run through a tiny wrapper that defines the variables and then loads your code from its own file, so error line numbers
 /// are those of your code.</summary>
 public class ScriptCard : ICardType
@@ -26,6 +27,7 @@ public class ScriptCard : ICardType
         const fs = require('fs');
         globalThis.input = JSON.parse(fs.readFileSync(process.env.TAMMOA_INPUT_FILE, 'utf8'));
         globalThis.runInput = JSON.parse(fs.readFileSync(process.env.TAMMOA_RUN_INPUT_FILE, 'utf8'));
+        globalThis.data = JSON.parse(fs.readFileSync(process.env.TAMMOA_DATA_FILE, 'utf8'));
         require(process.env.TAMMOA_SCRIPT_FILE);
         """;
 
@@ -36,9 +38,11 @@ public class ScriptCard : ICardType
             input_data = json.load(_f)
         with open(os.environ['TAMMOA_RUN_INPUT_FILE'], encoding='utf-8') as _f:
             run_input = json.load(_f)
+        with open(os.environ['TAMMOA_DATA_FILE'], encoding='utf-8') as _f:
+            data = json.load(_f)
         with open(_script, encoding='utf-8') as _f:
             _code = compile(_f.read(), _script, 'exec')
-        exec(_code, {'__name__': '__main__', '__file__': _script, 'input_data': input_data, 'run_input': run_input})
+        exec(_code, {'__name__': '__main__', '__file__': _script, 'input_data': input_data, 'run_input': run_input, 'data': data})
         """;
 
     private static readonly string[] Languages = ["shell", "javascript", "python"];
@@ -104,7 +108,11 @@ public class ScriptCard : ICardType
             var runJson = (context.RunInput ?? JValue.CreateNull()).ToString(Formatting.None);
             var runInputFile = Path.Combine(scratch, "run-input.json");
             await File.WriteAllTextAsync(runInputFile, runJson, ct);
-            var env = new Dictionary<string, string> { ["TAMMOA_INPUT_FILE"] = inputFile, ["TAMMOA_RUN_INPUT_FILE"] = runInputFile };
+            var dataJson = (context.Data ?? new JObject()).ToString(Formatting.None);
+            var dataFile = Path.Combine(scratch, "data.json");
+            await File.WriteAllTextAsync(dataFile, dataJson, ct);
+            var env = new Dictionary<string, string> { ["TAMMOA_INPUT_FILE"] = inputFile, ["TAMMOA_RUN_INPUT_FILE"] = runInputFile, ["TAMMOA_DATA_FILE"] = dataFile };
+            if (dataJson.Length <= MaxEnvJsonLength) env["TAMMOA_DATA"] = dataJson;
             if (inputJson.Length <= MaxEnvJsonLength) env["TAMMOA_INPUT"] = inputJson;
             if (runJson.Length <= MaxEnvJsonLength) env["TAMMOA_RUN_INPUT"] = runJson;
 

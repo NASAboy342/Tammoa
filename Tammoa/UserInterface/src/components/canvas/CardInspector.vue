@@ -17,6 +17,7 @@ import type { DraftNode } from '@/helpers/flowDraft'
 import { defaultParams } from '@/helpers/flowDraft'
 import { formatWhen } from '@/helpers/flowHelpers'
 import { tpl } from '@/helpers/fields'
+import { paramVisible, toolCallsOf } from '@/helpers/toolCalls'
 import { formatDuration, nodeStatusIcon, roundsOf, statusLabel, type NodeRunPick } from '@/helpers/runHelpers'
 import IconField from '@/components/forms/IconField.vue'
 import ExpandableText from '@/components/ExpandableText.vue'
@@ -26,6 +27,7 @@ import FieldExplorer from './FieldExplorer.vue'
 import GuidePanel from './GuidePanel.vue'
 import LiveOutput from './LiveOutput.vue'
 import RoundPicker from './RoundPicker.vue'
+import ToolCallList from './ToolCallList.vue'
 import DataCardsPanel from './DataCardsPanel.vue'
 
 export type InspectorTab = 'settings' | 'input' | 'output' | 'guide'
@@ -123,7 +125,7 @@ const hasData = (id: InspectorTab) => (id === 'input' ? realInput.value !== unde
     <div v-if="tab === 'settings'" class="space-y-3" role="tabpanel" data-testid="panel-settings">
       <IconField :model-value="node.name" label="Card name" icon="edit" :maxlength="100" testid="inspector-name" @update:model-value="emit('rename', $event)" />
       <ParamField
-        v-for="p in info?.params ?? []"
+        v-for="p in (info?.params ?? []).filter((x) => paramVisible(x.key, values))"
         :key="p.key"
         :param="p"
         :model-value="values[p.key]"
@@ -182,6 +184,7 @@ const hasData = (id: InspectorTab) => (id === 'input' ? realInput.value !== unde
       <p v-if="roundError" class="flex items-start gap-1.5 text-xs font-semibold" data-testid="round-error"><AppIcon name="alert" :size="13" class="mt-0.5 shrink-0" /> This round failed: {{ roundError }}</p>
       <template v-if="realOutput !== undefined">
         <p class="text-[11px] text-muted" data-testid="output-source">{{ dataNote }}. The card after this one receives this as its input: copy a reference to use a field.</p>
+        <ToolCallList v-if="toolCallsOf(realOutput).length" :calls="toolCallsOf(realOutput)" testid="output-tool-calls" />
         <DataView :value="realOutput" root="input" title="Output" testid="output-data" />
       </template>
       <template v-else-if="info?.guide?.outputExample !== undefined">

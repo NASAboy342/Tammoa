@@ -33,6 +33,8 @@ export interface NodeIteration {
 export interface LiveOutput {
   text?: string
   thinking?: string
+  /** The tool calls an AI card has made so far (see helpers/toolCalls). */
+  toolCalls?: unknown[]
 }
 
 /** A complete snapshot of a run. The backend owns the state; the UI only displays snapshots. */

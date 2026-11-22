@@ -1,4 +1,18 @@
+import fs from 'node:fs'
+import os from 'node:os'
+import path from 'node:path'
 import { expect, type APIRequestContext, type Locator, type Page } from '@playwright/test'
+
+/** Where the dev backend really listens: 8000, or the random port it fell back to (it writes it to <tmp>/tammoa-api-port). */
+export function apiBase(): string {
+  try {
+    const port = Number(fs.readFileSync(path.join(os.tmpdir(), 'tammoa-api-port'), 'utf8').trim())
+    if (Number.isInteger(port) && port >= 1024 && port <= 65535) return `http://localhost:${port}`
+  } catch {
+    /* no port file: the default */
+  }
+  return 'http://localhost:8000'
+}
 
 export const unique = (label: string) => `${label} ${Date.now()}-${Math.floor(Math.random() * 1e4)}`
 

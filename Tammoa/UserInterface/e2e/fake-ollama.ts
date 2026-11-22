@@ -12,8 +12,9 @@ export interface Seen {
  * A tiny stand-in for an Ollama server, so the connection and Ollama card flows are tested without a real model.
  * /api/chat STREAMS (newline-delimited JSON, like the real one). With `hold: true` it sends the first pieces at once and then WAITS
  * until the test calls release(): that makes "the answer is visible while the model is still writing" deterministic.
+ * With `toolScript` (and a request that offers tools) the model first asks for the scripted tool calls, one list per model call, then answers.
  */
-export async function startFakeOllama(options: { key?: string; models?: string[]; hold?: boolean } = {}) {
+export async function startFakeOllama(options: { key?: string; models?: string[]; hold?: boolean; toolScript?: { name: string; arguments: Record<string, unknown> }[][] } = {}) {
   const seen: Seen[] = []
   const models = options.models ?? ['tiny:1b', 'big:70b']
   let release: () => void = () => {}
@@ -38,6 +39,16 @@ export async function startFakeOllama(options: { key?: string; models?: string[]
       if (req.url === '/api/tags') return send(200, { models: models.map((name) => ({ name })) })
       if (req.url === '/api/chat') {
         if (body.model === 'missing') return send(404, { error: "model 'missing' not found" })
+        if (options.toolScript && body.tools?.length) {
+          const step = body.messages.filter((m: any) => m.role === 'assistant').length
+          const calls = options.toolScript[step]
+          if (calls) {
+            res.writeHead(200, { 'Content-Type': 'application/x-ndjson' })
+            res.write(JSON.stringify({ model: body.model, message: { role: 'assistant', content: '', tool_calls: calls.map((c) => ({ function: { name: c.name, arguments: c.arguments } })) }, done: false }) + '\n')
+            res.end(JSON.stringify({ model: body.model, message: { role: 'assistant', content: '' }, done: true, done_reason: 'stop', prompt_eval_count: 3, eval_count: 2, total_duration: 500_000_000 }) + '\n')
+            return
+          }
+        }
         const user = [...body.messages].reverse().find((m: any) => m.role === 'user')?.content
         const answer = `fake answer to: ${user}`
         const words = answer.split(/(?<= )/) // pieces that keep their trailing space

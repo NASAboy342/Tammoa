@@ -2,7 +2,7 @@ import os from 'node:os'
 import path from 'node:path'
 import fs from 'node:fs'
 import { expect, test } from '@playwright/test'
-import { card, codeOf, edge, makeFlow, node, open, outputOf, runAndWait, setCode, setv, showJson, trigger, unique } from './helpers'
+import { apiBase, card, codeOf, edge, makeFlow, node, open, outputOf, runAndWait, setCode, setv, showJson, trigger, unique } from './helpers'
 import { startFakeOllama } from './fake-ollama'
 
 test.describe('the new cards, end to end through the backend engine', () => {
@@ -15,7 +15,7 @@ test.describe('the new cards, end to end through the backend engine', () => {
         [
           trigger(),
           card('w', 'flow.wait', { seconds: 0.1 }, 200),
-          card('h', 'net.http', { method: 'GET', url: 'http://localhost:8000/api/app/version' }, 400),
+          card('h', 'net.http', { method: 'GET', url: `${apiBase()}/api/app/version` }, 400),
           setv('s', '{"line":"v={{input.json.version}}"}', 600),
           card('wf', 'file.write', { path: file, content: '{{input.line}}\n' }, 800),
           card('rf', 'file.read', { path: '{{input.path}}' }, 1000),
@@ -117,12 +117,12 @@ test.describe('the new cards, end to end through the backend engine', () => {
   })
 
   test('an HTTP error status fails the card unless told not to', async ({ request }) => {
-    const failing = await makeFlow(request, [trigger(), card('h', 'net.http', { url: 'http://localhost:8000/api/flows/does-not-exist' })], [edge('t', 'h')])
+    const failing = await makeFlow(request, [trigger(), card('h', 'net.http', { url: `${apiBase()}/api/flows/does-not-exist` })], [edge('t', 'h')])
     const run = await runAndWait(request, failing.id)
     expect(run.status).toBe('failed')
     expect(run.nodes.find((n) => n.nodeId === 'h')!.error).toMatch(/HTTP 404/)
 
-    const lenient = await makeFlow(request, [trigger(), card('h', 'net.http', { url: 'http://localhost:8000/api/flows/does-not-exist', failOnError: false })], [edge('t', 'h')])
+    const lenient = await makeFlow(request, [trigger(), card('h', 'net.http', { url: `${apiBase()}/api/flows/does-not-exist`, failOnError: false })], [edge('t', 'h')])
     const ok = await runAndWait(request, lenient.id)
     expect(ok.status).toBe('succeeded')
     expect(outputOf(ok, 'h')).toMatchObject({ status: 404, ok: false })

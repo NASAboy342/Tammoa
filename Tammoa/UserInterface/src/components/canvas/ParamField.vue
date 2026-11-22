@@ -1,7 +1,8 @@
 <script setup lang="ts">
 /**
  * One card parameter, drawn from the backend's description of it. Kinds: text, textarea, number, bool, select
- * (fixed options, or options the backend loads, e.g. the models of a connection), code (editor) and connection.
+ * (fixed options, or options the backend loads, e.g. the models of a connection), multiSelect (tick several fixed options),
+ * code (editor) and connection.
  * There is no card-specific code here: a new card type only needs a descriptor on the backend.
  */
 import { computed, ref, watch } from 'vue'
@@ -14,17 +15,23 @@ import { cardApi, type CardParamInfo, type ParamOption } from '@/services/cardAp
 import StoredField from './StoredField.vue'
 import { useConnectionStore } from '@/stores/connectionStore'
 import { editorLanguage } from '@/helpers/layout'
+import { toggleValue, toolIcon } from '@/helpers/toolCalls'
 
 /** `card` is only needed by parameters whose value lives outside the flow (kind "stored"). */
 const props = defineProps<{ param: CardParamInfo; modelValue: unknown; values: Record<string, unknown>; card?: { flowId: string; id: string; name: string; saved: boolean } }>()
 const emit = defineEmits<{ 'update:modelValue': [value: unknown]; 'open-guide': [] }>()
 
 const connections = useConnectionStore()
-const icon: Record<CardParamInfo['kind'], IconName> = { text: 'edit', textarea: 'edit', number: 'hash', bool: 'check', select: 'list', code: 'code', connection: 'plug', stored: 'database' }
+const icon: Record<CardParamInfo['kind'], IconName> = { text: 'edit', textarea: 'edit', number: 'hash', bool: 'check', select: 'list', code: 'code', connection: 'plug', stored: 'database', multiSelect: 'list' }
 const text = () => (props.modelValue === undefined || props.modelValue === null ? '' : String(props.modelValue))
 const str = () => (typeof props.modelValue === 'string' ? props.modelValue : '')
 const field =
   'w-full rounded-control border border-line-strong bg-surface py-2 pl-9 pr-3 text-xs outline-none placeholder:text-muted focus:border-ink focus:ring-1 focus:ring-ink'
+
+// ---- multiSelect: tick several of the fixed options
+const chosen = computed(() => (Array.isArray(props.modelValue) ? (props.modelValue as unknown[]).filter((v): v is string => typeof v === 'string') : []))
+const optionValues = computed(() => (props.param.options ?? []).map((o) => o.value))
+const toggle = (value: string) => emit('update:modelValue', toggleValue(props.modelValue, value, optionValues.value))
 
 function onNumber(e: Event) {
   const raw = (e.target as HTMLInputElement).value
@@ -92,6 +99,27 @@ if (props.param.kind === 'connection' && !connections.connections.length && !con
     >
       <AppIcon :name="modelValue === true ? 'check' : 'x'" :size="13" /> {{ modelValue === true ? 'On' : 'Off' }}
     </button>
+
+    <div v-else-if="param.kind === 'multiSelect'" role="group" :aria-label="param.label" class="space-y-1" :data-testid="`param-input-${param.key}`">
+      <button
+        v-for="o in param.options ?? []"
+        :key="o.value"
+        type="button"
+        role="checkbox"
+        :aria-checked="chosen.includes(o.value)"
+        class="flex min-h-8 w-full items-center gap-2 rounded-control border px-2 text-left text-[11px] font-semibold hover:bg-surface-hover"
+        :class="chosen.includes(o.value) ? 'border-ink border-2' : 'border-line-strong border-dashed text-ink-soft'"
+        :data-testid="`param-option-${param.key}-${o.value}`"
+        @click="toggle(o.value)"
+      >
+        <AppIcon :name="toolIcon(o.value)" :size="14" class="shrink-0" />
+        <span class="min-w-0 flex-1 break-words">{{ o.label }}</span>
+        <AppIcon :name="chosen.includes(o.value) ? 'check-circle' : 'circle'" :size="14" class="shrink-0" />
+      </button>
+      <p v-if="chosen.includes('run_script')" class="flex items-start gap-1.5 rounded-control border border-dashed border-line-strong p-1.5 text-[11px] font-semibold" data-testid="param-warning-run_script">
+        <AppIcon name="alert" :size="12" class="mt-0.5 shrink-0" /> Run script only has a best-effort folder check. It is not a sandbox: add an approver model.
+      </p>
+    </div>
 
     <CodeField
       v-else-if="param.kind === 'code'"

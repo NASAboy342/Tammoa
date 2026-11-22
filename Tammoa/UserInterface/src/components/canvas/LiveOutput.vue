@@ -6,6 +6,8 @@
 import { nextTick, ref, watch } from 'vue'
 import AppIcon from '@/components/icons/AppIcon.vue'
 import type { LiveOutput } from '@/services/runApi'
+import { toolCallsOf } from '@/helpers/toolCalls'
+import ToolCallList from './ToolCallList.vue'
 
 const props = defineProps<{ live: LiveOutput }>()
 
@@ -31,6 +33,8 @@ const count = (s?: string) => (s ?? '').length.toLocaleString()
     <div class="flex items-center gap-1.5 text-[11px] font-semibold uppercase tracking-widest text-muted">
       <AppIcon name="edit" :size="13" /> Writing now
     </div>
+
+    <ToolCallList v-if="toolCallsOf(live).length" :calls="toolCallsOf(live)" testid="live-tool-calls" />
 
     <section v-if="live.thinking" data-testid="live-thinking-section">
       <button type="button" class="mb-1 flex w-full items-center gap-1.5 text-left text-[11px] font-semibold text-ink-soft" :aria-expanded="showThinking" data-testid="live-thinking-toggle" @click="showThinking = !showThinking">

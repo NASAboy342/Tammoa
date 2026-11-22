@@ -47,8 +47,8 @@ Open **Connections**, add your Ollama address (default `http://localhost:11434`;
 - Data moves from card to card: use `{{input.stdout}}` (the previous card's output) and `{{run.input}}` in card settings. Put values in shell commands with `{{input.text | sh}}` so quotes and spaces cannot break the command.
 - Everything runs in the backend, the window only displays the state. Run history is kept in memory (lost when the app closes); **Clear** in the run list removes finished runs, and each flow keeps its newest 50.
 - The side panel can be dragged wider; code and long text open in a larger editor or viewer. Hover shortened names to read them in full.
-- **AI tools (Ollama card):** tick tools the model may use (read file, write file, HTTP request, run script). File and script tools only work inside the card's *Tools folder*; HTTP only to its *Allowed hosts*; an optional *Approver model* must say yes to every call. Refused calls are explained to the model, which can try something else; the output lists every call (`toolCalls`). Needs a model with tool support (e.g. qwen3). *Run script* is a best-effort guard, not a sandbox. (The editor UI for these settings is still to come.)
-- Not built yet: schedule and webhook triggers, OpenAI / Anthropic connections, tool picker UI.
+- **AI tools (Ollama card):** tick tools the model may use (read file, write file, HTTP request, run script). File and script tools only work inside the card's *Tools folder*; HTTP only to its *Allowed hosts*; an optional *Approver model* must say yes to every call. Refused calls are explained to the model, which can try something else; the output lists every call (`toolCalls`). Needs a model with tool support (e.g. qwen3). *Run script* is a best-effort guard, not a sandbox. In the card's settings, tick the tools; the folder, hosts, steps and approver fields appear only when they matter. The Output tab lists every tool call (ran / refused / failed) with its arguments and result, live while the card runs.
+- Not built yet: schedule and webhook triggers, OpenAI / Anthropic connections.
 
 ## Loops and card size
 - **Loop:** drag from a card's right dot back onto a card that comes before it. The line is dashed and labelled *loop*; the target runs again with the new output as its input, and the cards after the loop's exit (the IF *false* side) wait until it is over. A card hung off a normal card inside the loop (e.g. Write file after a JSON card) runs every round. End a loop with an **IF** card (its *true* branch goes back, *false* goes on). A loop with no end is stopped at the **loop limit** (field in the toolbar, default 50 runs per card) with a clear message.
@@ -82,14 +82,14 @@ Build these with the `enhance` skill, one slice at a time.
 | Process | Directory | Command | Port | Ready check |
 |---|---|---|---|---|
 | frontend | `Tammoa/UserInterface` | `npm run dev` | 5173 | `http://localhost:5173` |
-| backend  | `Tammoa` | `dotnet run` | 8000 | `http://localhost:8000/api/health` |
+| backend  | `Tammoa` | `dotnet run` | 8000, or a random free port | `http://localhost:<port>/api/health`; the port is printed (`API: …`) and written to `$TMPDIR/tammoa-api-port` |
 
 First time: `npm install` in `Tammoa/UserInterface`.
 Logs: `$TMPDIR/tammoa-frontend.log`, `$TMPDIR/tammoa-backend.log`
-`dotnet run` (Debug) opens the native window pointed at the Vite dev server, so start the frontend first.
+If 8000 is taken (another app), the Debug backend tries up to 5 random free ports and gives up with a message if none works (`TAMMOA_PORT` sets the preferred port). The Vite proxy follows the port file, so nothing else needs configuring; release builds bind no fixed port. `dotnet run` (Debug) opens the native window pointed at the Vite dev server, so start the frontend first.
 
 ## Stop locally
-Use the `stop-test` skill. Ports: 5173, 8000. Process match: `bin/Debug/net8.0/Tammoa`.
+Use the `stop-test` skill. Ports: 5173, 8000 or the one in `$TMPDIR/tammoa-api-port`. Process match: `bin/Debug/net8.0/Tammoa`.
 
 ## Tests
 - Backend: `dotnet test`

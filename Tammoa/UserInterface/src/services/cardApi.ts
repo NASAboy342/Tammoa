@@ -1,6 +1,6 @@
 import { requestJson } from './httpClient'
 
-export type ParamKind = 'text' | 'textarea' | 'number' | 'bool' | 'select' | 'code' | 'connection' | 'stored'
+export type ParamKind = 'text' | 'textarea' | 'number' | 'bool' | 'select' | 'code' | 'connection' | 'stored' | 'multiSelect'
 export type CardCategory = 'trigger' | 'logic' | 'data' | 'action' | 'ai'
 
 export interface ParamOption {

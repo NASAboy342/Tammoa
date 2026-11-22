@@ -21,7 +21,21 @@ internal static class Program
 
         // This already built the host, so its DI container is sealed: app services get their own container.
         var app = PhotinoServer.CreateStaticFileServer(args, out string baseUrl);
-        app.Urls.Add("http://localhost:8000");
+#if DEBUG
+        // Dev only: the Vite proxy needs a known API address. 8000 (or TAMMOA_PORT) if free, else up to 5 random ports, else give up.
+        // The UI of a packaged app is served by the static server itself (baseUrl, a free port of its own), so release binds nothing extra.
+        int apiPort;
+        try { apiPort = PortFinder.Choose(PortFinder.PreferredFrom(Environment.GetEnvironmentVariable(PortFinder.PortEnvVar))); }
+        catch (InvalidOperationException ex)
+        {
+            Console.Error.WriteLine(ex.Message);
+            Environment.ExitCode = 1;
+            return;
+        }
+        app.Urls.Add($"http://localhost:{apiPort}");
+        PortFinder.WritePortFile(PortFinder.PortFile(), apiPort);
+        Console.WriteLine($"API: http://localhost:{apiPort}");
+#endif
 
         DataPaths.RestrictToOwner(DataPaths.DataDir()); // the database holds connection keys
         var services = new ServiceCollection();
@@ -89,5 +103,8 @@ internal static class Program
         app.RunAsync();
         window.Load(appUrl);
         window.WaitForClose();
+#if DEBUG
+        try { File.Delete(PortFinder.PortFile()); } catch (IOException) { /* best effort: a stale file only points at a closed port */ }
+#endif
     }
 }

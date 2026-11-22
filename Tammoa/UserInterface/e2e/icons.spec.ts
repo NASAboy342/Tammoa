@@ -1,3 +1,6 @@
+import fs from 'node:fs'
+import os from 'node:os'
+import path from 'node:path'
 import { expect, test, type Page } from '@playwright/test'
 import { drag, edge, makeFlow, node, openTab, runAndWait, script, setCode, showJson, trigger } from './helpers'
 import { startFakeOllama } from './fake-ollama'
@@ -291,6 +294,38 @@ test('the audit really looks at the controls (not an empty selection)', async ({
   await page.getByTestId('flows').waitFor()
   const visible = await page.locator(CLICKABLE).evaluateAll((els) => els.filter((e) => e.getBoundingClientRect().width > 0).length)
   expect(visible).toBeGreaterThanOrEqual(2) // brand, theme toggle, new flow (+ rows)
+})
+
+test('AI tool settings (ticked tools, warning) and the tool call list (live and in the output): every clickable has an icon', async ({ page, request }) => {
+  const fake = await startFakeOllama({ hold: true, toolScript: [[{ name: 'read_file', arguments: { path: 'a.txt' } }, { name: 'write_file', arguments: { path: '../x.txt', content: 'x' } }]] })
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'tammoa-e2e-icons-'))
+  try {
+    const conn = await (await request.post('/api/connections', { data: { name: `Fake ${Date.now()}`, provider: 'ollama', baseUrl: fake.url } })).json()
+    const flow = await (await request.post('/api/flows', { data: { name: `Tools ${Date.now()}`, description: '' } })).json()
+    const nodes = [
+      { id: 't', type: 'trigger.manual', name: 'Start', position: { x: 0, y: 0 }, params: {} },
+      { id: 'a', type: 'ai.ollama', name: 'Ask', position: { x: 280, y: 0 }, params: { connection: conn.id, model: 'tiny:1b', prompt: 'go', think: 'off', tools: ['read_file', 'write_file', 'http_request', 'run_script'], toolRoot: root, allowedHosts: 'a.test' } },
+    ]
+    await request.put(`/api/flows/${flow.id}`, { data: { name: flow.name, description: '', definition: { nodes, edges: [{ id: 'e', source: 't', target: 'a' }] } } })
+    await page.goto(`/#/flows/${flow.id}`)
+    await page.getByTestId('node-a').click()
+    await expect(page.getByTestId('param-warning-run_script')).toBeVisible()
+    expect(await withoutIcon(page), 'tool settings with every tool ticked').toEqual([])
+
+    await page.getByTestId('run').click()
+    await expect(page.getByTestId('live-tool-calls')).toBeVisible()
+    expect(await withoutIcon(page), 'live tool calls').toEqual([])
+    fake.release()
+    await expect(page.getByTestId('node-a')).toHaveAttribute('data-status', 'succeeded')
+    await page.getByTestId('inspector-tab-output').click()
+    await page.getByTestId('tool-call-toggle-0').click()
+    await page.getByTestId('tool-call-toggle-1').click()
+    await expect(page.getByTestId('tool-call-detail-1')).toBeVisible()
+    expect(await withoutIcon(page), 'tool calls in the output, opened').toEqual([])
+  } finally {
+    await fake.close()
+    fs.rmSync(root, { recursive: true, force: true })
+  }
 })
 
 test('the audit itself catches an icon-less button', async ({ page }) => {

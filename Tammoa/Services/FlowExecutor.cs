@@ -36,6 +36,32 @@ public class FlowExecutor : IFlowExecutor
         bool IsBack((string Source, string Handle, string Target) e) => loops.BackEdges.Contains((e.Source, e.Target));
         var forwardIncoming = incoming.ToDictionary(k => k.Key, k => k.Value.Where(e => !IsBack(e)).ToList());
         var backOut = nodes.Keys.ToDictionary(k => k, k => edges.Where(e => e.Source == k && IsBack(e)).ToList());
+
+        // ---- side branches: a card that hangs off a NON-branching card inside a loop (e.g. a Write file after a JSON card) is not the
+        // loop's exit, it is something done every round, so it runs each round (it is reset with the loop) instead of waiting for the end.
+        // A card reached through a branching card's output that leaves the loop (IF "false") is the exit and still waits.
+        bool Branches(string id) => _cards.Find((string)nodes[id]["type"]!) is { } c && c.Info.Outputs.Count > 1;
+        HashSet<string> Reach(IEnumerable<string> from)
+        {
+            var seen = new HashSet<string>();
+            var todo = new Stack<string>(from);
+            while (todo.Count > 0)
+            {
+                var u = todo.Pop();
+                if (!seen.Add(u)) continue;
+                foreach (var e in edges.Where(e => e.Source == u && !IsBack(e))) todo.Push(e.Target);
+            }
+            return seen;
+        }
+        var sideLoop = new Dictionary<string, int>(); // side-branch card -> the loop whose rounds it follows
+        foreach (var (loopId, members) in loops.LoopMembers)
+        {
+            bool Leaves(string s, string t) => loops.LoopOf.GetValueOrDefault(t, -1) != loopId && members.Contains(s);
+            var exits = Reach(edges.Where(e => !IsBack(e) && Leaves(e.Source, e.Target) && Branches(e.Source)).Select(e => e.Target));
+            var sides = Reach(edges.Where(e => !IsBack(e) && Leaves(e.Source, e.Target) && !Branches(e.Source)).Select(e => e.Target));
+            foreach (var sd in sides.Where(x => !exits.Contains(x) && !loops.LoopOf.ContainsKey(x))) sideLoop[sd] = loopId;
+        }
+        int? LoopIdOf(string id) => loops.LoopOf.TryGetValue(id, out var l) ? l : sideLoop.TryGetValue(id, out var sl) ? sl : null;
         var loopLimit = (int?)(definition["settings"]?["loopLimit"]) is { } l and >= 1 ? Math.Min(l, 1000) : DefaultLoopLimit;
         var visits = new Dictionary<string, int>();                      // how many times each card has started in this run
         var history = new Dictionary<string, List<NodeIteration>>();     // earlier rounds of a card (newest NodeIteration.Max kept)
@@ -102,8 +128,8 @@ public class FlowExecutor : IFlowExecutor
         var inputs = new Dictionary<string, JToken?>(); // what each started card received, kept in its NodeRun
 
         static bool Terminal(NodeRunStatus st) => st is NodeRunStatus.Succeeded or NodeRunStatus.Failed or NodeRunStatus.Skipped or NodeRunStatus.Cancelled;
-        bool SameLoop(string a, string b) => loops.LoopOf.TryGetValue(a, out var la) && loops.LoopOf.TryGetValue(b, out var lb) && la == lb;
-        bool LoopAlive(string p) => loops.LoopOf.TryGetValue(p, out var l) && loops.LoopMembers[l].Any(m => status[m] is NodeRunStatus.Pending or NodeRunStatus.Running);
+        bool SameLoop(string a, string b) => LoopIdOf(a) is { } la && LoopIdOf(b) is { } lb && la == lb;
+        bool LoopAlive(string p) => LoopIdOf(p) is { } l && (loops.LoopMembers[l].Any(m => status[m] is NodeRunStatus.Pending or NodeRunStatus.Running) || retrigger.Keys.Any(t => loops.LoopOf[t] == l)); // a queued loop-back means another round is coming
         // a parent is settled when it has finished, and (if it is part of ANOTHER loop) that loop has stopped repeating:
         // a card after a loop waits for the loop to end instead of being skipped on the first round
         bool Settled(string parent, string node) => Terminal(status[parent]) && (SameLoop(parent, node) || !LoopAlive(parent));
@@ -128,7 +154,8 @@ public class FlowExecutor : IFlowExecutor
                 // ---- loop-backs that fired: when no card of that loop is still running, start the next round
                 foreach (var target in retrigger.Keys.ToList())
                 {
-                    var region = loops.LoopMembers[loops.LoopOf[target]];
+                    var loopId = loops.LoopOf[target];
+                    var region = loops.LoopMembers[loopId].Concat(sideLoop.Where(s => s.Value == loopId).Select(s => s.Key)).ToList();
                     if (region.Any(m => status[m] == NodeRunStatus.Running)) continue;
                     var newInputs = retrigger[target];
                     retrigger.Remove(target);

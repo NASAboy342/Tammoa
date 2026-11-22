@@ -217,6 +217,26 @@ public class FlowExecutorLoopTest
     }
 
     [Test]
+    public async Task ASideBranchOffANonBranchingLoopCard_RunsEveryRound_NotOnlyWhenTheLoopIsOver()
+    {
+        // trigger -> inc -> check; check.again -> inc; check.done -> after; inc -> save (a side branch, like Write file after a JSON card)
+        var save = new FnCard("save", (c, _) => new JObject { ["saved"] = c.Input!["n"]!.DeepClone() });
+        var run = await Run($"[{N("t", "trigger")},{N("inc", "inc")},{N("check", "check")},{N("save", "save")},{N("after", "after")}]",
+            $"[{E("t", "inc")},{E("inc", "check")},{E("inc", "save")},{E("check", "inc", "again")},{E("check", "after", "done")}]", "", default, save);
+        Assert.That(run.Status, Is.EqualTo(RunStatus.Succeeded), run.Error);
+        Assert.That(save.Runs, Is.EqualTo(3), "once per round");
+        Assert.That(save.Inputs.Select(i => (int)i!["n"]!), Is.EqualTo(new[] { 1, 2, 3 }));
+        Assert.That(_after.Runs, Is.EqualTo(1), "exit: " + string.Join(",", run.Nodes.Select(n => n.NodeId + "=" + n.Status)));
+        // the first save started before the loop was over: it did not wait for the last round
+        lock (_snapshots)
+        {
+            var firstSave = _snapshots.First(s => Node(s, "save").Status == NodeRunStatus.Running);
+            Assert.That(Node(firstSave, "check").Iteration, Is.LessThan(3));
+            Assert.That(Node(firstSave, "after").Status, Is.EqualTo(NodeRunStatus.Pending));
+        }
+    }
+
+    [Test]
     public async Task AdditionalLoopBacksFromParallelCards_WaitForTheSlowOne_ThenStartOneRoundWithBothOutputs()
     {
         // a feeds x and y; both loop back to a. The second round starts only when BOTH have finished, with both outputs.

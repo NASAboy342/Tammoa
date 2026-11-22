@@ -50,7 +50,7 @@ Open **Connections**, add your Ollama address (default `http://localhost:11434`;
 - Not built yet: schedule and webhook triggers, OpenAI / Anthropic connections, an agent loop with tool calling.
 
 ## Loops and card size
-- **Loop:** drag from a card's right dot back onto a card that comes before it. The line is dashed and labelled *loop*; the target runs again with the new output as its input, and the cards after the loop wait until it is over. End a loop with an **IF** card (its *true* branch goes back, *false* goes on). A loop with no end is stopped at the **loop limit** (field in the toolbar, default 50 runs per card) with a clear message.
+- **Loop:** drag from a card's right dot back onto a card that comes before it. The line is dashed and labelled *loop*; the target runs again with the new output as its input, and the cards after the loop's exit (the IF *false* side) wait until it is over. A card hung off a normal card inside the loop (e.g. Write file after a JSON card) runs every round. End a loop with an **IF** card (its *true* branch goes back, *false* goes on). A loop with no end is stopped at the **loop limit** (field in the toolbar, default 50 runs per card) with a clear message.
 - Cards that ran more than once show `×N`; in the side panel use the round arrows to read what each earlier round got and produced (last 10 kept).
 - **Card size:** cards grow to show their whole title. Drag the small handle at a card's bottom-right corner to resize it; double-click the handle to return to automatic.
 

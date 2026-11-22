@@ -11,6 +11,7 @@ public class OllamaCardTest
 {
     private IConnectionService _connections = null!;
     private IOllamaClient _client = null!;
+    private IToolLoop _loop = null!;
     private OllamaCard _sut = null!;
     private static string Json(object o) => JObject.FromObject(o).ToString();
     private static CardExecutionContext Ctx(object p, JToken? input = null, JToken? run = null) => new(JObject.Parse(Json(p)), input, run);
@@ -23,10 +24,11 @@ public class OllamaCardTest
     {
         _connections = Substitute.For<IConnectionService>();
         _client = Substitute.For<IOllamaClient>();
+        _loop = Substitute.For<IToolLoop>();
         _connections.GetForUse("c1").Returns(Conn());
         _client.ChatAsync(default!, default!, default, default)
             .ReturnsForAnyArgs(Task.FromResult(new OllamaChatResult("Hello", null, "qwen3:14b", true, "stop", 5, 2, 120.5)));
-        _sut = new OllamaCard(new TemplateEngine(), _connections, _client);
+        _sut = new OllamaCard(new TemplateEngine(), _connections, _client, _loop);
     }
 
     [Test]
@@ -155,5 +157,75 @@ public class OllamaCardTest
         var model = info.Params.Single(p => p.Key == "model");
         Assert.That(model.OptionsSource, Is.EqualTo("ollama.models"));
         Assert.That(model.OptionsDependsOn, Is.EqualTo("connection"));
+    }
+
+    // ---- tools
+    private string _tmp = null!;
+    private string TmpRoot() => _tmp ??= Directory.CreateDirectory(Path.Combine(Path.GetTempPath(), "tammoa-card-" + Guid.NewGuid().ToString("N"))).FullName;
+
+    [TearDown]
+    public void CleanTmp() { if (_tmp is not null && Directory.Exists(_tmp)) Directory.Delete(_tmp, true); _tmp = null!; }
+
+    [Test]
+    public async Task NoToolsSelected_BehavesAsBefore_TheLoopIsNotUsed()
+    {
+        await _sut.ExecuteAsync(Ctx(new { connection = "c1", model = "m", prompt = "p", tools = new string[0], toolRoot = "", maxSteps = 99 }), default);
+        await _client.ReceivedWithAnyArgs(1).ChatAsync(default!, default!, default, default, default);
+        await _loop.DidNotReceiveWithAnyArgs().RunAsync(default!, default, default);
+    }
+
+    [Test]
+    public async Task ToolsSelected_GoThroughTheLoop_WithTheRulesFromTheParams()
+    {
+        _loop.RunAsync(default!, default, default).ReturnsForAnyArgs(new JObject { ["text"] = "done", ["toolCalls"] = new JArray() });
+        var root = TmpRoot();
+        var r = (await _sut.ExecuteAsync(Ctx(new
+        {
+            connection = "c1", model = "qwen3:14b", prompt = "go", tools = new[] { "read_file", "http_request" }, toolRoot = root,
+            allowedHosts = "api.example.com, *.docs.test", maxSteps = 5, approverModel = "small", timeoutSeconds = 7, think = "off",
+        }), default)).Output;
+        Assert.That((string?)r["text"], Is.EqualTo("done"));
+        await _client.DidNotReceiveWithAnyArgs().ChatAsync(default!, default!, default, default, default);
+        await _loop.Received(1).RunAsync(Arg.Is<ToolLoopRequest>(q =>
+            q.Model == "qwen3:14b" && q.Prompt == "go" && q.MaxSteps == 5 && q.ApproverModel == "small" && q.Think == false && q.Timeout == TimeSpan.FromSeconds(7)
+            && q.ToolIds.SequenceEqual(new[] { "read_file", "http_request" }) && q.Context.AllowedHosts.SequenceEqual(new[] { "api.example.com", "*.docs.test" })
+            && q.Context.Root != null && q.Context.Root.EndsWith(Path.GetFileName(root))), Arg.Any<Action<JToken>?>(), Arg.Any<CancellationToken>());
+    }
+
+    [Test]
+    public async Task EmptyApprover_MeansNoApproval_AndTheRootIsNotNeededForHttpOnly()
+    {
+        _loop.RunAsync(default!, default, default).ReturnsForAnyArgs(new JObject());
+        await _sut.ExecuteAsync(Ctx(new { connection = "c1", model = "m", prompt = "p", tools = new[] { "http_request" }, allowedHosts = "a.test", approverModel = " " }), default);
+        await _loop.Received(1).RunAsync(Arg.Is<ToolLoopRequest>(q => q.ApproverModel == null && q.Context.Root == null && q.MaxSteps == 8), Arg.Any<Action<JToken>?>(), Arg.Any<CancellationToken>());
+    }
+
+    [Test]
+    public void ToolsConfig_IsValidated()
+    {
+        var root = TmpRoot();
+        void Bad(object p, string contains)
+        {
+            var ex = Assert.ThrowsAsync<ArgumentException>(() => _sut.ExecuteAsync(Ctx(p), default));
+            Assert.That(ex!.Message, Does.Contain(contains));
+        }
+        Bad(new { connection = "c1", model = "m", prompt = "p", tools = new[] { "write_file" } }, "tools folder");
+        Bad(new { connection = "c1", model = "m", prompt = "p", tools = new[] { "run_script" }, toolRoot = "relative/dir" }, "absolute");
+        Bad(new { connection = "c1", model = "m", prompt = "p", tools = new[] { "read_file" }, toolRoot = Path.Combine(root, "missing") }, "does not exist");
+        Bad(new { connection = "c1", model = "m", prompt = "p", tools = new[] { "http_request" } }, "allowed host");
+        Bad(new { connection = "c1", model = "m", prompt = "p", tools = new[] { "read_file" }, toolRoot = root, maxSteps = 0 }, "Max steps");
+        Bad(new { connection = "c1", model = "m", prompt = "p", tools = new[] { "read_file" }, toolRoot = root, maxSteps = 31 }, "Max steps");
+        Bad(new { connection = "c1", model = "m", prompt = "p", tools = new[] { "format_disk" }, toolRoot = root }, "Unknown tool");
+        Bad(new { connection = "c1", model = "m", prompt = "p", tools = new[] { "read_file" }, toolRoot = root, jsonMode = true }, "JSON");
+    }
+
+    [Test]
+    public void ToolsParam_IsAMultiSelect_WithTheFourToolsAndNothingSelectedByDefault()
+    {
+        var p = _sut.Info.Params.Single(x => x.Key == "tools");
+        Assert.That(p.Kind, Is.EqualTo(ParamKind.MultiSelect));
+        Assert.That(p.Options!.Select(o => o.Value), Is.EqualTo(new[] { "read_file", "write_file", "http_request", "run_script" }));
+        Assert.That(p.DefaultValue, Is.Null);
+        Assert.That(_sut.Info.Params.Single(x => x.Key == "approverModel").OptionsDependsOn, Is.EqualTo("connection"));
     }
 }

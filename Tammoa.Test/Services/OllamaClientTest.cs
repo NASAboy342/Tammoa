@@ -200,4 +200,45 @@ public class OllamaClientTest
         using var cts = new CancellationTokenSource(100);
         Assert.CatchAsync<OperationCanceledException>(() => client.ChatAsync(Conn(), new OllamaChatRequest("m", null, "p", null, null, false, null), TimeSpan.FromSeconds(30), cts.Token));
     }
+
+    [Test]
+    public async Task ChatTurn_SendsTheToolsAndMessages_AndReadsTheToolCalls()
+    {
+        var stub = Stream(Lines(
+            new { model = "m", message = new { role = "assistant", content = "", tool_calls = new[] { new { function = new { name = "read_file", arguments = new { path = "a.txt" } } } } }, done = false },
+            new { model = "m", message = new { role = "assistant", content = "" }, done = true, done_reason = "stop", eval_count = 4 }));
+        var messages = new JArray(new JObject { ["role"] = "user", ["content"] = "hi" }, new JObject { ["role"] = "tool", ["tool_name"] = "x", ["content"] = "r" });
+        var tools = new JArray(new JObject { ["type"] = "function", ["function"] = new JObject { ["name"] = "read_file" } });
+        var r = await new OllamaClient(new HttpClient(stub)).ChatTurnAsync(Conn(), new OllamaTurnRequest("m", messages, tools, 0.1, 50, null), TimeSpan.FromSeconds(30), default);
+
+        var sent = JObject.Parse(stub.Seen[0].Body);
+        Assert.That((string)sent["tools"]![0]!["function"]!["name"]!, Is.EqualTo("read_file"));
+        Assert.That(sent["messages"]!.Count(), Is.EqualTo(2));
+        Assert.That((string)sent["messages"]![1]!["role"]!, Is.EqualTo("tool"));
+        Assert.That((bool)sent["stream"]!, Is.True);
+        Assert.That(sent["think"], Is.Null);
+        Assert.That(r.ToolCalls, Has.Count.EqualTo(1));
+        Assert.That(r.ToolCalls[0].Name, Is.EqualTo("read_file"));
+        Assert.That((string)r.ToolCalls[0].Arguments["path"]!, Is.EqualTo("a.txt"));
+        Assert.That(r.Chat.ResponseTokens, Is.EqualTo(4));
+    }
+
+    [Test]
+    public async Task ChatTurn_ArgumentsSentAsJsonText_AreParsed_AndNoToolsMeansNoToolsField()
+    {
+        var stub = Stream(Lines(
+            new { model = "m", message = new { role = "assistant", content = "", tool_calls = new[] { new { function = new { name = "t", arguments = "{\"a\":1}" } } } }, done = true }));
+        var r = await new OllamaClient(new HttpClient(stub)).ChatTurnAsync(Conn(), new OllamaTurnRequest("m", new JArray(), null, null, null, null), TimeSpan.FromSeconds(30), default);
+        Assert.That((int)r.ToolCalls[0].Arguments["a"]!, Is.EqualTo(1));
+        Assert.That(JObject.Parse(stub.Seen[0].Body)["tools"], Is.Null);
+    }
+
+    [Test]
+    public void ChatTurn_AModelWithoutToolSupport_GetsAClearMessage()
+    {
+        var stub = StubHandler.Json("{\"error\":\"registry.ollama.ai/library/gemma:2b does not support tools\"}", HttpStatusCode.BadRequest);
+        var ex = Assert.ThrowsAsync<InvalidOperationException>(() => new OllamaClient(new HttpClient(stub)).ChatTurnAsync(Conn(),
+            new OllamaTurnRequest("gemma:2b", new JArray(), new JArray(new JObject()), null, null, null), TimeSpan.FromSeconds(30), default));
+        Assert.That(ex!.Message, Does.Contain("does not support tools").And.Contain("untick the tools"));
+    }
 }

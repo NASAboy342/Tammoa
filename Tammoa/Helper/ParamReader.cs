@@ -39,4 +39,15 @@ public static class ParamReader
         if (t.Type == JTokenType.Boolean) return (bool)t;
         return bool.TryParse((string?)t, out var b) ? b : fallback;
     }
+
+    /// <summary>A list of strings: a JSON array, or a comma/newline separated text. Empty entries are dropped, duplicates removed.</summary>
+    public static IReadOnlyList<string> GetStringList(JObject p, string key)
+    {
+        var t = p[key];
+        if (t is null || t.Type == JTokenType.Null) return [];
+        IEnumerable<string> items = t is JArray a
+            ? a.Select(x => x.Type == JTokenType.String ? (string)x! : x.ToString(Newtonsoft.Json.Formatting.None))
+            : ((string?)t ?? "").Split([',', '\n', ';'], StringSplitOptions.RemoveEmptyEntries);
+        return items.Select(x => x.Trim()).Where(x => x.Length > 0).Distinct().ToList();
+    }
 }

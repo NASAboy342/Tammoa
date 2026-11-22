@@ -347,7 +347,7 @@ public class MoreCardsTest
         [
             new ManualTriggerCard(), new SetValueCard(T), new ScriptCard(T, Substitute.For<IProcessRunner>()), new IfCard(T), new WaitCard(),
             new HttpRequestCard(T, Substitute.For<IHttpRequestRunner>()), new JsonCard(T), new MergeCard(), new ReadFileCard(T), new WriteFileCard(T),
-            new OllamaCard(T, conn, ollama),
+            new OllamaCard(T, conn, ollama, Substitute.For<IToolLoop>()),
         ];
         Assert.That(cards.Select(c => c.Info.Type), Is.Unique);
         foreach (var c in cards)

@@ -99,3 +99,6 @@ public record CardExecutionContext(
         ["data"] = Data?.DeepClone() ?? new JObject(),
     };
 }
+
+/// <summary>A function the model may call (sent to the model as a JSON-schema function).</summary>
+public record ToolDefinition(string Name, string Description, JObject Parameters);

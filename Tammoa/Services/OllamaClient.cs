@@ -29,19 +29,28 @@ public class OllamaClient : IOllamaClient
         var messages = new JArray();
         if (!string.IsNullOrWhiteSpace(r.System)) messages.Add(new JObject { ["role"] = "system", ["content"] = r.System });
         messages.Add(new JObject { ["role"] = "user", ["content"] = r.Prompt });
-        var body = new JObject { ["model"] = r.Model, ["messages"] = messages, ["stream"] = true };
-        var options = new JObject();
-        if (r.Temperature is { } t) options["temperature"] = t;
-        if (r.MaxTokens is { } n) options["num_predict"] = n;
-        if (options.HasValues) body["options"] = options;
+        var body = BuildBody(r.Model, messages, null, r.Temperature, r.MaxTokens, r.Think);
         if (r.JsonMode) body["format"] = "json";
-        if (r.Think is { } think) body["think"] = think;
+        return (await StreamChatAsync(c, body, r.Model, timeout, ct, onDelta)).Chat;
+    }
 
-        return await StreamChatAsync(c, body, r.Model, timeout, ct, onDelta);
+    public Task<OllamaTurnResult> ChatTurnAsync(Connection c, OllamaTurnRequest r, TimeSpan timeout, CancellationToken ct, Action<string, string>? onDelta = null) =>
+        StreamChatAsync(c, BuildBody(r.Model, r.Messages, r.Tools, r.Temperature, r.MaxTokens, r.Think), r.Model, timeout, ct, onDelta);
+
+    private static JObject BuildBody(string model, JArray messages, JArray? tools, double? temperature, int? maxTokens, bool? think)
+    {
+        var body = new JObject { ["model"] = model, ["messages"] = messages, ["stream"] = true };
+        if (tools is { Count: > 0 }) body["tools"] = tools;
+        var options = new JObject();
+        if (temperature is { } t) options["temperature"] = t;
+        if (maxTokens is { } n) options["num_predict"] = n;
+        if (options.HasValues) body["options"] = options;
+        if (think is { } th) body["think"] = th;
+        return body;
     }
 
     /// <summary>Reads Ollama's newline-delimited JSON stream, handing the growing text to <paramref name="onDelta"/>.</summary>
-    private async Task<OllamaChatResult> StreamChatAsync(Connection c, JObject body, string requestedModel, TimeSpan timeout, CancellationToken ct, Action<string, string>? onDelta)
+    private async Task<OllamaTurnResult> StreamChatAsync(Connection c, JObject body, string requestedModel, TimeSpan timeout, CancellationToken ct, Action<string, string>? onDelta)
     {
         using var request = new HttpRequestMessage(HttpMethod.Post, c.BaseUrl.TrimEnd('/') + "/api/chat");
         if (!string.IsNullOrEmpty(c.ApiKey)) request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", c.ApiKey);
@@ -52,6 +61,7 @@ public class OllamaClient : IOllamaClient
         var text = new StringBuilder();
         var thinking = new StringBuilder();
         JObject? last = null;
+        var toolCalls = new List<(string Name, JObject Arguments)>();
         try
         {
             using var response = await _http.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, linked.Token);
@@ -74,6 +84,7 @@ public class OllamaClient : IOllamaClient
                 {
                     text.Append((string?)m["content"]);
                     thinking.Append((string?)m["thinking"]);
+                    if (m["tool_calls"] is JArray calls) foreach (var call in calls) toolCalls.Add(ReadToolCall(call));
                     onDelta?.Invoke(thinking.ToString(), text.ToString());
                 }
                 if ((bool?)piece["done"] == true) last = piece;
@@ -88,7 +99,7 @@ public class OllamaClient : IOllamaClient
             throw new InvalidOperationException($"Could not reach Ollama at {c.BaseUrl}: {ex.Message}");
         }
 
-        return new OllamaChatResult(
+        var chat = new OllamaChatResult(
             text.ToString(),
             thinking.Length == 0 ? null : thinking.ToString(),
             (string?)last?["model"] ?? requestedModel,
@@ -97,11 +108,27 @@ public class OllamaClient : IOllamaClient
             (int?)last?["prompt_eval_count"],
             (int?)last?["eval_count"],
             (double?)last?["total_duration"] is { } ns ? Math.Round(ns / 1_000_000, 1) : null);
+        return new OllamaTurnResult(chat, toolCalls);
+    }
+
+    /// <summary>{ function: { name, arguments } }; the arguments are an object, but some servers send them as JSON text.</summary>
+    private static (string Name, JObject Arguments) ReadToolCall(JToken call)
+    {
+        var fn = call["function"] ?? call;
+        var name = (string?)fn["name"] ?? "";
+        var args = fn["arguments"];
+        if (args is JValue { Type: JTokenType.String } text)
+        {
+            try { args = JToken.Parse((string)text!); } catch (Newtonsoft.Json.JsonReaderException) { args = null; }
+        }
+        return (name, args as JObject ?? new JObject());
     }
 
     private static string ErrorMessage(Connection c, HttpStatusCode status, string detail) => status switch
     {
         HttpStatusCode.Unauthorized or HttpStatusCode.Forbidden => $"Ollama refused the request ({(int)status}). Check the API key of this connection.",
+        _ when detail.Contains("does not support tools", StringComparison.OrdinalIgnoreCase) =>
+            "This model does not support tools. Choose another model (for example qwen3 or llama3.1) or untick the tools.",
         HttpStatusCode.NotFound when detail.Contains("model", StringComparison.OrdinalIgnoreCase) => $"Ollama: {detail}",
         _ => $"Ollama answered {(int)status}" + (detail.Length > 0 ? $": {detail}" : "."),
     };

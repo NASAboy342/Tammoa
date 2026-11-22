@@ -7,6 +7,7 @@ using Tammoa.Helper;
 using Tammoa.Repositories;
 using Tammoa.Services;
 using Tammoa.Services.Cards;
+using Tammoa.Services.Tools;
 
 namespace Tammoa;
 
@@ -47,6 +48,12 @@ internal static class Program
         services.AddSingleton(_ => new HttpClient(new SocketsHttpHandler { AutomaticDecompression = System.Net.DecompressionMethods.All }) { Timeout = Timeout.InfiniteTimeSpan }); // cards enforce their own timeouts
         services.AddSingleton<IHttpRequestRunner, HttpRequestRunner>();
         services.AddSingleton<IOllamaClient, OllamaClient>();
+        services.AddSingleton<ITool, ReadFileTool>();
+        services.AddSingleton<ITool, WriteFileTool>();
+        services.AddSingleton<ITool, HttpRequestTool>();
+        services.AddSingleton<ITool, RunScriptTool>();
+        services.AddSingleton<IToolRegistry, ToolRegistry>();
+        services.AddSingleton<IToolLoop, ToolLoop>();
         services.AddSingleton<IConnectionRepository>(_ => new ConnectionRepository(DataPaths.DatabaseFile()));
         services.AddSingleton<IConnectionService, ConnectionService>();
         services.AddSingleton<ICardOptionsService, CardOptionsService>();

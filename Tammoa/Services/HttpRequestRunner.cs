@@ -6,11 +6,12 @@ namespace Tammoa.Services;
 public class HttpRequestRunner : IHttpRequestRunner
 {
     public const int ResponseCap = 1024 * 1024;
+    private static readonly HttpClient NoRedirectClient = new(new SocketsHttpHandler { AllowAutoRedirect = false, AutomaticDecompression = System.Net.DecompressionMethods.All }) { Timeout = Timeout.InfiniteTimeSpan };
     private readonly HttpClient _client;
 
     public HttpRequestRunner(HttpClient client) => _client = client;
 
-    public async Task<HttpRequestResult> SendAsync(string method, Uri url, IReadOnlyDictionary<string, string> headers, string? body, TimeSpan timeout, CancellationToken ct)
+    public async Task<HttpRequestResult> SendAsync(string method, Uri url, IReadOnlyDictionary<string, string> headers, string? body, TimeSpan timeout, CancellationToken ct, bool followRedirects = true)
     {
         using var request = new HttpRequestMessage(new HttpMethod(method), url);
         var contentType = headers.FirstOrDefault(h => h.Key.Equals("Content-Type", StringComparison.OrdinalIgnoreCase)).Value;
@@ -31,7 +32,7 @@ public class HttpRequestRunner : IHttpRequestRunner
         using var linked = CancellationTokenSource.CreateLinkedTokenSource(ct, timeoutCts.Token);
         try
         {
-            using var response = await _client.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, linked.Token);
+            using var response = await (followRedirects ? _client : NoRedirectClient).SendAsync(request, HttpCompletionOption.ResponseHeadersRead, linked.Token);
             var responseHeaders = response.Headers.Concat(response.Content.Headers)
                 .ToDictionary(h => h.Key.ToLowerInvariant(), h => string.Join(", ", h.Value));
             var (text, truncated) = await ReadCappedAsync(response, linked.Token);

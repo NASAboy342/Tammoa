@@ -3,19 +3,22 @@ using Newtonsoft.Json.Linq;
 using Tammoa.Enums;
 using Tammoa.Helper;
 using Tammoa.Models;
+using Tammoa.Services.Tools;
 
 namespace Tammoa.Services.Cards;
 
-/// <summary>One chat turn with an Ollama model. TODO(agent loop): tool calling and multi-turn loops are a separate card.</summary>
+/// <summary>One chat turn with an Ollama model; with tools selected it becomes a loop: the model may call the chosen tools (inside the card's rules) until it answers.</summary>
 public class OllamaCard : ICardType
 {
     public const string TypeId = "ai.ollama";
     private readonly ITemplateEngine _templates;
     private readonly IConnectionService _connections;
     private readonly IOllamaClient _ollama;
+    private readonly IToolLoop _loop;
 
-    public OllamaCard(ITemplateEngine templates, IConnectionService connections, IOllamaClient ollama)
+    public OllamaCard(ITemplateEngine templates, IConnectionService connections, IOllamaClient ollama, IToolLoop loop)
     {
+        _loop = loop;
         _templates = templates;
         _connections = connections;
         _ollama = ollama;
@@ -35,6 +38,15 @@ public class OllamaCard : ICardType
             new CardParamInfo("jsonMode", "Answer as JSON", ParamKind.Bool, DefaultValue: false, Help: "Asks the model for valid JSON; it is also returned as { json }."),
             new CardParamInfo("think", "Reasoning (think)", ParamKind.Select, DefaultValue: "auto",
                 Options: [new("auto", "Auto (model default)"), new("on", "On"), new("off", "Off")], Help: "For reasoning models such as qwen3. Off is faster; auto sends nothing."),
+            new CardParamInfo("tools", "Tools the model may use", ParamKind.MultiSelect, Options: ToolIds.Options,
+                Help: "None by default: the model only answers. Tick a tool to let it act. A model that supports tools is needed (qwen3, llama3.1…)."),
+            new CardParamInfo("toolRoot", "Tools folder (root)", ParamKind.Text, Placeholder: "/path/to/a/work/folder",
+                Help: "Required for the file and script tools. They can only touch this folder (and below); anything else is refused. Absolute path, the folder must exist."),
+            new CardParamInfo("allowedHosts", "Allowed hosts (HTTP tool)", ParamKind.Text, Placeholder: "api.example.com, *.example.org",
+                Help: "Comma separated. The HTTP tool only talks to these hosts; empty = the HTTP tool refuses everything."),
+            new CardParamInfo("maxSteps", "Max steps", ParamKind.Number, DefaultValue: 8, Help: "1 to 30 model calls. A step is one question to the model; it stops the loop when the model keeps asking for tools."),
+            new CardParamInfo("approverModel", "Approver model (optional)", ParamKind.Select, OptionsSource: "ollama.models", OptionsDependsOn: "connection",
+                Help: "A small model that must approve every tool call first (it sees the task, the tool and its arguments). Empty = no approval. A refused call is told to the main model, which can try something else."),
             new CardParamInfo("timeoutSeconds", "Stop if silent for (seconds)", ParamKind.Number, DefaultValue: 120, Help: "1 to 1800. The card stops when the model sends nothing for this long (a long answer that keeps coming is never cut off). The first call can be slow while the model loads."),
         ])
     {
@@ -58,7 +70,7 @@ public class OllamaCard : ICardType
                     new JObject { ["system"] = "You are a terse assistant. Answer in one sentence.", ["prompt"] = "{{run.input}}", ["think"] = "off" },
                     "System: You are a terse assistant. Answer in one sentence.\nPrompt: {{run.input}}", "text", RunInput: "Why is the sky blue?", Result: "A one-sentence answer in {{input.text}}."),
             ],
-            ["Output fields: text (the answer), json (JSON mode), thinking (reasoning models), model, promptTokens, responseTokens, totalDurationMs.", "Small models work best with short, direct prompts. Reasoning Off is much faster for models like qwen3.", "The first call loads the model into memory and can take a while; the timeout is 120 s by default."]),
+            ["Output fields: text (the answer), json (JSON mode), thinking (reasoning models), model, promptTokens, responseTokens, totalDurationMs.", "Small models work best with short, direct prompts. Reasoning Off is much faster for models like qwen3.", "The first call loads the model into memory and can take a while; the timeout is 120 s by default.", "Tools: tick what the model may do (read file, write file, HTTP request, run script). File and script tools only work inside the Tools folder; the HTTP tool only talks to the Allowed hosts. A refused call is told to the model, it is not an error. Output then also has toolCalls (what it called, and ran / rejected / failed) and steps.", "An Approver model (a small model) can be asked about every tool call first; if it does not clearly say yes, the call is refused. Run script is only a best-effort guard (paths in the text are checked, it is not a sandbox): keep it off unless you need it, and use the approver."]),
     };
 
     public async Task<CardResult> ExecuteAsync(CardExecutionContext context, CancellationToken ct)
@@ -86,6 +98,30 @@ public class OllamaCard : ICardType
         if (seconds < 1 || seconds > 1800) throw new ArgumentException("Timeout must be between 1 and 1800 seconds.");
         var jsonMode = ParamReader.GetBool(context.Params, "jsonMode", false);
         bool? think = ParamReader.GetString(context.Params, "think") switch { "on" => true, "off" => false, "" or "auto" => null, var other => throw new ArgumentException($"Unknown think setting '{other}'.") };
+
+        var toolIds = ParamReader.GetStringList(context.Params, "tools");
+        if (toolIds.Count > 0)
+        {
+            if (jsonMode) throw new ArgumentException("\"Answer as JSON\" cannot be combined with tools. Switch one of them off.");
+            var maxSteps = ParamReader.GetInt(context.Params, "maxSteps", 8);
+            if (maxSteps < 1 || maxSteps > 30) throw new ArgumentException("Max steps must be between 1 and 30.");
+            var unknown = toolIds.FirstOrDefault(id => ToolIds.Options.All(o => o.Value != id));
+            if (unknown is not null) throw new ArgumentException($"Unknown tool '{unknown}'.");
+            string? root = null;
+            if (toolIds.Any(id => id is ToolIds.ReadFile or ToolIds.WriteFile or ToolIds.RunScript))
+            {
+                var rootText = _templates.Render(ParamReader.GetString(context.Params, "toolRoot"), ctx).Trim();
+                if (rootText.Length == 0) throw new ArgumentException("Set the tools folder (root): the file and script tools only work inside it.");
+                root = FilePaths.RequireAbsolute(rootText);
+                if (!Directory.Exists(root)) throw new ArgumentException($"The tools folder does not exist: {root}");
+            }
+            var hosts = ParamReader.GetStringList(new JObject { ["h"] = _templates.Render(ParamReader.GetString(context.Params, "allowedHosts"), ctx) }, "h");
+            if (toolIds.Contains(ToolIds.HttpRequest) && hosts.Count == 0) throw new ArgumentException("Set at least one allowed host for the HTTP tool.");
+            var approver = ParamReader.GetString(context.Params, "approverModel").Trim();
+
+            return (await _loop.RunAsync(new ToolLoopRequest(connection, model, system, prompt, temperature, maxTokens is { } mt ? (int)mt : null, think, TimeSpan.FromSeconds(seconds),
+                toolIds, new ToolContext(root, hosts), approver.Length > 0 ? approver : null, maxSteps), context.Progress, ct));
+        }
 
         var result = await _ollama.ChatAsync(connection,
             new OllamaChatRequest(model, system, prompt, temperature, maxTokens is { } m ? (int)m : null, jsonMode, think),

@@ -23,7 +23,7 @@ public class CardGuidesTest
     [
         new ManualTriggerCard(), new SetValueCard(T), new ScriptCard(T, new ProcessRunner()), new IfCard(T), new WaitCard(),
         new HttpRequestCard(T, Substitute.For<IHttpRequestRunner>()), new JsonCard(T), new MergeCard(), new ReadFileCard(T), new WriteFileCard(T),
-        new OllamaCard(T, Substitute.For<IConnectionService>(), Substitute.For<IOllamaClient>()), new DataStoreCard(T, Data),
+        new OllamaCard(T, Substitute.For<IConnectionService>(), Substitute.For<IOllamaClient>(), Substitute.For<IToolLoop>()), new DataStoreCard(T, Data),
     ];
 
     private static bool Found(string exe)

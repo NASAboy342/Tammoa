@@ -38,9 +38,9 @@ test.describe('the new cards, end to end through the backend engine', () => {
     const file = path.join(dir, 'not', 'there.txt')
     try {
       const flow = await makeFlow(request, [trigger(), card('rf', 'file.read', { path: file }, 280, 0, 'Read')], [edge('t', 'rf')])
-      const first = await runAndWait(request, flow.id)
+      const first = await runAndWait(request, flow.id, 'hello')
       expect(first.status, first.error).toBe('succeeded') // no "File not found" error any more
-      expect(outputOf(first, 'rf')).toEqual({ path: file, text: '', size: 0, exists: false })
+      expect(outputOf(first, 'rf')).toEqual({ path: file, text: '', size: 0, exists: false, input: { input: 'hello' } }) // the input it received is carried along
       expect(fs.existsSync(path.join(dir, 'not'))).toBe(false) // and nothing was created
 
       await open(page, flow.id)
@@ -62,6 +62,25 @@ test.describe('the new cards, end to end through the backend engine', () => {
       const third = await runAndWait(request, flow.id)
       expect(outputOf(third, 'rf')).toMatchObject({ text: 'kept', exists: true })
       expect(fs.readFileSync(file, 'utf8')).toBe('kept') // an existing file is never touched
+    } finally {
+      fs.rmSync(dir, { recursive: true, force: true })
+    }
+  })
+
+  test('the read file output carries the input it received, so the next card can use both', async ({ request }) => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'tammoa-e2e-'))
+    const file = path.join(dir, 'note.txt')
+    fs.writeFileSync(file, 'file text')
+    try {
+      const flow = await makeFlow(
+        request,
+        [trigger(), setv('s', JSON.stringify({ path: file, who: 'Dara' }), 200), card('rf', 'file.read', { path: '{{input.path}}' }, 400), setv('u', '{"line":"{{input.input.who}} read {{input.text}}"}', 600)],
+        [edge('t', 's'), edge('s', 'rf'), edge('rf', 'u')],
+      )
+      const run = await runAndWait(request, flow.id)
+      expect(run.status, run.error).toBe('succeeded')
+      expect(outputOf(run, 'rf')).toMatchObject({ text: 'file text', exists: true, input: { path: file, who: 'Dara' } })
+      expect(outputOf(run, 'u')).toEqual({ line: 'Dara read file text' })
     } finally {
       fs.rmSync(dir, { recursive: true, force: true })
     }

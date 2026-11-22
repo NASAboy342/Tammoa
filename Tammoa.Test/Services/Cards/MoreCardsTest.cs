@@ -228,6 +228,34 @@ public class MoreCardsTest
     }
 
     [Test]
+    public async Task Read_CarriesItsInputToTheOutput_WhetherTheFileIsThereOrNot()
+    {
+        Directory.CreateDirectory(_dir);
+        var here = Path.Combine(_dir, "here.txt");
+        File.WriteAllText(here, "hi");
+        var input = JObject.Parse("{\"name\":\"today\",\"list\":[1,2]}");
+        var card = new ReadFileCard(T);
+        var found = (await card.ExecuteAsync(Ctx(Json(new { path = here }), input), default)).Output;
+        Assert.That(JToken.DeepEquals(found["input"], input), Is.True);
+        Assert.That((string?)found["text"], Is.EqualTo("hi"));
+        var missing = (await card.ExecuteAsync(Ctx(Json(new { path = Path.Combine(_dir, "no.txt") }), input), default)).Output;
+        Assert.That(JToken.DeepEquals(missing["input"], input), Is.True);
+        found["input"]!["name"] = "changed";
+        Assert.That((string?)input["name"], Is.EqualTo("today")); // a copy, not the same object
+    }
+
+    [Test]
+    public async Task Read_WithNoInput_HasANullInput()
+    {
+        Directory.CreateDirectory(_dir);
+        var path = Path.Combine(_dir, "x.txt");
+        File.WriteAllText(path, "x");
+        var r = (await new ReadFileCard(T).ExecuteAsync(Ctx(Json(new { path })), default)).Output;
+        Assert.That(((JObject)r).ContainsKey("input"), Is.True);
+        Assert.That(r["input"]!.Type, Is.EqualTo(JTokenType.Null));
+    }
+
+    [Test]
     public void Read_APathThatIsAFolder_Throws()
     {
         Directory.CreateDirectory(_dir);

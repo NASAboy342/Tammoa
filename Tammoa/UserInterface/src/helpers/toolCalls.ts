@@ -6,6 +6,8 @@ export interface ToolCall {
   name: string
   arguments?: Record<string, unknown>
   decision: 'ran' | 'rejected' | 'failed'
+  /** For a refused call: a safety rule (folder, host, script check) or the approver model. */
+  by?: 'rule' | 'approver'
   reason?: string
   result?: string
   durationMs?: number
@@ -21,6 +23,11 @@ export const toolIcon = (name: string): IconName => TOOL_ICON[name] ?? 'zap'
 
 export const DECISION_ICON: Record<ToolCall['decision'], IconName> = { ran: 'check-circle', rejected: 'stop', failed: 'alert' }
 export const DECISION_LABEL: Record<ToolCall['decision'], string> = { ran: 'Ran', rejected: 'Refused', failed: 'Failed' }
+
+/** "Ran", "Failed", or for a refusal who refused: "Refused (rule)" / "Refused (approver)". */
+export function decisionLabel(c: Pick<ToolCall, 'decision' | 'by'>): string {
+  return c.decision === 'rejected' && c.by ? `${DECISION_LABEL.rejected} (${c.by})` : DECISION_LABEL[c.decision]
+}
 
 /** The tool calls inside a card output / live object, or [] when there are none (any other shape is ignored). */
 export function toolCallsOf(value: unknown): ToolCall[] {
@@ -64,6 +71,7 @@ export function paramVisible(key: string, values: Record<string, unknown>): bool
   if (key === 'toolRoot') return tools.some((t) => FILE_TOOLS.includes(t))
   if (key === 'allowedHosts') return tools.includes('http_request')
   if (key === 'maxSteps' || key === 'approverModel') return tools.length > 0
+  if (key === 'approverPrompt') return tools.length > 0 && typeof values.approverModel === 'string' && values.approverModel.trim() !== '' // only when an approver is chosen
   return true
 }
 

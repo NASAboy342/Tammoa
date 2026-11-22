@@ -193,6 +193,28 @@ public class OllamaCardTest
     }
 
     [Test]
+    public async Task ApproverPrompt_IsPassedThrough_TrimmedAndEmptyMeansNull()
+    {
+        _loop.RunAsync(default!, default, default).ReturnsForAnyArgs(new JObject());
+        var root = TmpRoot();
+        await _sut.ExecuteAsync(Ctx(new { connection = "c1", model = "m", prompt = "p", tools = new[] { "read_file" }, toolRoot = root, approverModel = "small", approverPrompt = "  Only .txt.  " }), default);
+        await _sut.ExecuteAsync(Ctx(new { connection = "c1", model = "m", prompt = "p", tools = new[] { "read_file" }, toolRoot = root, approverModel = "small", approverPrompt = "  " }), default);
+        await _sut.ExecuteAsync(Ctx(new { connection = "c1", model = "m", prompt = "p", tools = new[] { "read_file" }, toolRoot = root }), default);
+        var seen = _loop.ReceivedCalls().Select(c => ((ToolLoopRequest)c.GetArguments()[0]!).ApproverInstructions).ToList();
+        Assert.That(seen, Is.EqualTo(new string?[] { "Only .txt.", null, null }));
+    }
+
+    [Test]
+    public void ApproverPromptParam_IsAnOptionalTextarea_ShowingTheBuiltInTextAsItsPlaceholder()
+    {
+        var p = _sut.Info.Params.Single(x => x.Key == "approverPrompt");
+        Assert.That(p.Kind, Is.EqualTo(ParamKind.Textarea));
+        Assert.That(p.Required, Is.False);
+        Assert.That(p.Placeholder, Is.EqualTo(ToolLoop.DefaultApproverInstructions));
+        Assert.That(p.Help, Does.Contain("Empty"));
+    }
+
+    [Test]
     public async Task EmptyApprover_MeansNoApproval_AndTheRootIsNotNeededForHttpOnly()
     {
         _loop.RunAsync(default!, default, default).ReturnsForAnyArgs(new JObject());

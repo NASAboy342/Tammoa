@@ -7,7 +7,7 @@ import { ref } from 'vue'
 import AppIcon from '@/components/icons/AppIcon.vue'
 import ExpandableText from '@/components/ExpandableText.vue'
 import OutputViewer from '@/components/OutputViewer.vue'
-import { DECISION_ICON, DECISION_LABEL, callDetail, formatToolDuration, summarizeArgs, summarizeCalls, toolIcon, type ToolCall } from '@/helpers/toolCalls'
+import { DECISION_ICON, callDetail, decisionLabel, formatToolDuration, summarizeArgs, summarizeCalls, toolIcon, type ToolCall } from '@/helpers/toolCalls'
 
 defineProps<{ calls: ToolCall[]; testid?: string }>()
 const open = ref<Set<number>>(new Set())
@@ -33,7 +33,7 @@ const toggle = (i: number) => {
             <span class="block truncate text-muted" :title="summarizeArgs(c.arguments, 1000)">{{ summarizeArgs(c.arguments) }}</span>
           </span>
           <span class="inline-flex shrink-0 items-center gap-1 font-semibold" :data-testid="`tool-call-decision-${i}`">
-            <AppIcon :name="DECISION_ICON[c.decision]" :size="13" /> {{ DECISION_LABEL[c.decision] }}
+            <AppIcon :name="DECISION_ICON[c.decision]" :size="13" /> {{ decisionLabel(c) }}
           </span>
           <span v-if="formatToolDuration(c.durationMs)" class="shrink-0 text-muted">{{ formatToolDuration(c.durationMs) }}</span>
           <AppIcon :name="open.has(i) ? 'chevron-up' : 'chevron-down'" :size="12" class="shrink-0" />

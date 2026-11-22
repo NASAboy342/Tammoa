@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { DECISION_ICON, TOOL_ICON, callDetail, formatToolDuration, paramVisible, summarizeArgs, summarizeCalls, toggleValue, toolCallsOf, toolIcon, type ToolCall } from '../toolCalls'
+import { DECISION_ICON, TOOL_ICON, callDetail, decisionLabel, formatToolDuration, paramVisible, summarizeArgs, summarizeCalls, toggleValue, toolCallsOf, toolIcon, type ToolCall } from '../toolCalls'
 import { ICONS } from '@/components/icons/icons'
 
 const call = (decision: ToolCall['decision'], extra: Partial<ToolCall> = {}): ToolCall => ({ step: 1, name: 'write_file', decision, ...extra })
@@ -51,6 +51,17 @@ describe('formatToolDuration / summarizeCalls / callDetail', () => {
   })
 })
 
+describe('decisionLabel', () => {
+  it('says who refused', () => {
+    expect(decisionLabel(call('ran'))).toBe('Ran')
+    expect(decisionLabel(call('failed'))).toBe('Failed')
+    expect(decisionLabel(call('rejected'))).toBe('Refused')
+    expect(decisionLabel(call('rejected', { by: 'rule' }))).toBe('Refused (rule)')
+    expect(decisionLabel(call('rejected', { by: 'approver' }))).toBe('Refused (approver)')
+    expect(decisionLabel(call('ran', { by: 'rule' }))).toBe('Ran')
+  })
+})
+
 describe('paramVisible', () => {
   it('shows the tool settings only when relevant; other params always', () => {
     expect(paramVisible('prompt', {})).toBe(true)
@@ -62,6 +73,13 @@ describe('paramVisible', () => {
     expect(paramVisible('maxSteps', { tools: ['http_request'] })).toBe(true)
     expect(paramVisible('approverModel', { tools: ['run_script'] })).toBe(true)
     expect(paramVisible('toolRoot', { tools: 'read_file' })).toBe(false) // not an array: nothing selected
+  })
+  it('shows the approver instructions only when an approver model is chosen', () => {
+    expect(paramVisible('approverPrompt', {})).toBe(false)
+    expect(paramVisible('approverPrompt', { tools: ['read_file'] })).toBe(false)
+    expect(paramVisible('approverPrompt', { tools: ['read_file'], approverModel: '  ' })).toBe(false)
+    expect(paramVisible('approverPrompt', { tools: ['read_file'], approverModel: 'qwen3:0.6b' })).toBe(true)
+    expect(paramVisible('approverPrompt', { tools: [], approverModel: 'qwen3:0.6b' })).toBe(false)
   })
 })
 

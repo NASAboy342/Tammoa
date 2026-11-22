@@ -47,6 +47,8 @@ public class OllamaCard : ICardType
             new CardParamInfo("maxSteps", "Max steps", ParamKind.Number, DefaultValue: 8, Help: "1 to 30 model calls. A step is one question to the model; it stops the loop when the model keeps asking for tools."),
             new CardParamInfo("approverModel", "Approver model (optional)", ParamKind.Select, OptionsSource: "ollama.models", OptionsDependsOn: "connection",
                 Help: "A small model that must approve every tool call first (it sees the task, the tool and its arguments). Empty = no approval. A refused call is told to the main model, which can try something else."),
+            new CardParamInfo("approverPrompt", "Approver instructions (optional)", ParamKind.Textarea, Placeholder: ToolLoop.DefaultApproverInstructions,
+                Help: "Empty = the built-in instructions (shown in grey). Writing your own replaces them; the reply format (JSON with approve and reason) is added for you. Keep it short and about safety: small models judge badly when asked whether the work is good."),
             new CardParamInfo("timeoutSeconds", "Stop if silent for (seconds)", ParamKind.Number, DefaultValue: 120, Help: "1 to 1800. The card stops when the model sends nothing for this long (a long answer that keeps coming is never cut off). The first call can be slow while the model loads."),
         ])
     {
@@ -120,7 +122,8 @@ public class OllamaCard : ICardType
             var approver = ParamReader.GetString(context.Params, "approverModel").Trim();
 
             return (await _loop.RunAsync(new ToolLoopRequest(connection, model, system, prompt, temperature, maxTokens is { } mt ? (int)mt : null, think, TimeSpan.FromSeconds(seconds),
-                toolIds, new ToolContext(root, hosts), approver.Length > 0 ? approver : null, maxSteps), context.Progress, ct));
+                toolIds, new ToolContext(root, hosts), approver.Length > 0 ? approver : null, maxSteps,
+                ParamReader.GetString(context.Params, "approverPrompt").Trim() is { Length: > 0 } custom ? custom : null), context.Progress, ct));
         }
 
         var result = await _ollama.ChatAsync(connection,

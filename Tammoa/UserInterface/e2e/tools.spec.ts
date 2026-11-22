@@ -40,6 +40,13 @@ test.describe('AI tools: settings', () => {
       await expect(page.getByTestId('param-warning-run_script')).toContainText('not a sandbox')
       await expect(page.getByTestId('param-toolRoot')).toBeVisible()
 
+      // the approver instructions appear only once an approver model is chosen
+      await expect(page.getByTestId('param-approverPrompt')).toHaveCount(0)
+      await page.getByTestId('param-input-approverModel').selectOption('tiny:1b')
+      await expect(page.getByTestId('param-approverPrompt')).toBeVisible()
+      await expect(page.getByTestId('param-input-approverPrompt')).toHaveAttribute('placeholder', /safety reviewer/)
+      await page.getByTestId('param-input-approverPrompt').fill('Only approve writes to .txt files.')
+
       await page.getByTestId('param-input-toolRoot').fill('/tmp/tammoa-e2e-root')
       await page.getByTestId('param-input-allowedHosts').fill('api.example.com')
       await page.getByTestId('edit-save').click()
@@ -52,10 +59,12 @@ test.describe('AI tools: settings', () => {
       await expect(option(page, 'read_file')).toHaveAttribute('aria-checked', 'false')
       await expect(page.getByTestId('param-input-toolRoot')).toHaveValue('/tmp/tammoa-e2e-root')
       await expect(page.getByTestId('param-input-allowedHosts')).toHaveValue('api.example.com')
+      await expect(page.getByTestId('param-input-approverPrompt')).toHaveValue('Only approve writes to .txt files.')
 
       // the saved definition holds a plain list of tool ids
       const saved = await (await request.get(`/api/flows/${flow.id}`)).json()
       expect(saved.definition.nodes.find((n: any) => n.id === 'ai').params.tools).toEqual(['http_request', 'run_script'])
+      expect(saved.definition.nodes.find((n: any) => n.id === 'ai').params.approverPrompt).toBe('Only approve writes to .txt files.')
     } finally {
       await fake.close()
     }
@@ -110,7 +119,7 @@ test.describe('AI tools: a run', () => {
       await expect(page.getByTestId('tool-calls-summary')).toContainText('2 calls: 1 ran, 1 refused')
       await expect(list.getByTestId('tool-call-0')).toHaveAttribute('data-decision', 'ran')
       await expect(list.getByTestId('tool-call-1')).toHaveAttribute('data-decision', 'rejected')
-      await expect(list.getByTestId('tool-call-decision-1')).toContainText('Refused')
+      await expect(list.getByTestId('tool-call-decision-1')).toContainText('Refused (rule)')
 
       await list.getByTestId('tool-call-toggle-1').click()
       await expect(list.getByTestId('tool-call-reason-1')).toContainText('outside the allowed folder')

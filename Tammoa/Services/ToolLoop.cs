@@ -8,6 +8,25 @@ namespace Tammoa.Services;
 public class ToolLoop : IToolLoop
 {
     public const int ResultCap = 20_000;
+    public const int TaskExcerptChars = 600;
+
+    /// <summary>What the approver is told. Safety only: a small model that is asked "does this fit the task?" rejects good work with made-up reasons.</summary>
+    public const string DefaultApproverInstructions =
+        "You are a safety reviewer for ONE tool call an AI assistant wants to make.\n" +
+        "Judge ONLY these three things:\n" +
+        "1. Is the call destructive (deletes files, overwrites files the task did not ask to change, runs rm or format, sends data somewhere unknown)?\n" +
+        "2. Does it touch anything outside the allowed folder or allowed hosts?\n" +
+        "3. Is it clearly unrelated to the task?\n" +
+        "Do NOT judge whether the work is complete, correct or well written, and do NOT judge what a file contains. " +
+        "Creating or editing a file inside the allowed folder that the task asks for is fine. If none of the three applies, approve.\n" +
+        "Example 1: task \"Write a note into a.txt\", tool write_file {\"path\":\"a.txt\",\"content\":\"hi\"} -> {\"reason\": \"Writes the requested file inside the folder.\", \"approve\": true}\n" +
+        "Example 2: task \"Summarise notes.txt\", tool run_script {\"code\":\"rm -rf *\"} -> {\"reason\": \"Deletes files; the task only asks for a summary.\", \"approve\": false}";
+
+    // the reason comes BEFORE the verdict: a small model that has to say why first contradicts itself less ("deletes files" and then approve: true)
+    private const string ApproverReplyFormat = "Reply with JSON only, the reason first: {\"reason\": \"why, in one short sentence\", \"approve\": true or false}.";
+
+    /// <summary>A refusal by the approver model (as opposed to a safety rule): the main model is told differently, and the record says who refused.</summary>
+    private sealed class ApproverRefused(string reason) : ToolRejectedException(reason);
     private static readonly TimeSpan ApproverTimeout = TimeSpan.FromSeconds(60);
     private readonly IOllamaClient _ollama;
     private readonly IToolRegistry _tools;
@@ -103,13 +122,14 @@ public class ToolLoop : IToolLoop
                 throw new ArgumentException($"There is no tool '{name}'. Available tools: {string.Join(", ", selected.Keys)}.");
             tool.Check(arguments, r.Context); // the rules first: a call that breaks them never reaches the approver
             if (r.ApproverModel is { Length: > 0 } approver && await AskApproverAsync(r, approver, name, arguments, ct) is { } refusal)
-                throw new ToolRejectedException(refusal);
+                throw new ApproverRefused(refusal);
             record["result"] = ToolArgs.Limit(await tool.RunAsync(arguments, r.Context, ct), ResultCap);
             record["decision"] = "ran";
         }
         catch (ToolRejectedException ex)
         {
             record["decision"] = "rejected";
+            record["by"] = ex is ApproverRefused ? "approver" : "rule";
             record["reason"] = ex.Message;
         }
         catch (Exception ex) when (ex is ArgumentException or InvalidOperationException or IOException or UnauthorizedAccessException)
@@ -124,32 +144,36 @@ public class ToolLoop : IToolLoop
     /// <summary>Asks the small model. Returns null when approved, else the reason. Anything unclear counts as "no".</summary>
     private async Task<string?> AskApproverAsync(ToolLoopRequest r, string model, string name, JObject arguments, CancellationToken ct)
     {
-        const string system = "You approve or reject ONE tool call an AI assistant wants to make. Reply with JSON only: {\"approve\": true or false, \"reason\": \"one short sentence\"}. " +
-                              "Approve only a call that is safe, fits the task and stays inside the allowed folder. Reject anything destructive, unrelated to the task or outside the allowed folder.";
+        var system = (string.IsNullOrWhiteSpace(r.ApproverInstructions) ? DefaultApproverInstructions : r.ApproverInstructions.Trim()) + "\n\n" + ApproverReplyFormat;
         var args = ToolArgs.Limit(arguments.ToString(Newtonsoft.Json.Formatting.None), 4000);
-        var prompt = $"Task given to the assistant:\n{ToolArgs.Limit(r.Prompt, 2000)}\n\nAllowed folder: {r.Context.Root ?? "(none)"}\nAllowed hosts: {(r.Context.AllowedHosts.Count == 0 ? "(none)" : string.Join(", ", r.Context.AllowedHosts))}\n\nTool: {name}\nArguments: {args}";
+        // the call first, then only the start of the task: a long brief (roles, background) confuses a small model
+        var prompt = $"Tool call:\nTool: {name}\nArguments: {args}\n\nAllowed folder: {r.Context.Root ?? "(none)"}\nAllowed hosts: {(r.Context.AllowedHosts.Count == 0 ? "(none)" : string.Join(", ", r.Context.AllowedHosts))}\n\nTask given to the assistant (start of it):\n{Excerpt(r.Prompt, TaskExcerptChars)}";
         try
         {
             var answer = await _ollama.ChatAsync(r.Connection, new OllamaChatRequest(model, system, prompt, 0, 200, true, false), ApproverTimeout, ct);
             var json = JObject.Parse(answer.Text);
             if (json["approve"] is { Type: JTokenType.Boolean } ok && (bool)ok) return null;
             var reason = (string?)json["reason"];
-            return "Not approved: " + (string.IsNullOrWhiteSpace(reason) ? "the approver said no." : reason.Trim());
+            return string.IsNullOrWhiteSpace(reason) ? "The approver said no." : reason.Trim();
         }
         catch (Newtonsoft.Json.JsonReaderException)
         {
-            return "Not approved: the approver's answer could not be read.";
+            return "The approver's answer could not be read.";
         }
         catch (InvalidOperationException ex)
         {
-            return $"Not approved: the approver could not be asked ({ex.Message}).";
+            return $"The approver could not be asked ({ex.Message}).";
         }
     }
+
+    private static string Excerpt(string text, int max) => text.Length <= max ? text.Trim() : text[..max].TrimEnd() + "…";
 
     private static string ModelFacing(JObject record) => (string?)record["decision"] switch
     {
         "ran" => (string)record["result"]!,
-        "rejected" => "rejected: " + (string?)record["reason"],
+        "rejected" when (string?)record["by"] == "approver" =>
+            $"A reviewer refused this call, so it was NOT done. Reason: {(string?)record["reason"]} Change the call, or tell the user what you could not do. Do not say it was done.",
+        "rejected" => $"Refused by a safety rule, so it was NOT done: {(string?)record["reason"]}",
         _ => "error: " + (string?)record["reason"],
     };
 

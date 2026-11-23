@@ -8,7 +8,9 @@ namespace Tammoa.Services;
 public class ToolLoop : IToolLoop
 {
     public const int ResultCap = 20_000;
-    public const int TaskExcerptChars = 600;
+    public const int TaskExcerptChars = 600;  // a task up to this long is given whole
+    public const int TaskHeadChars = 250;     // longer: its start ...
+    public const int TaskTailChars = 350;     // ... and its end (the real request is often last, after a long brief)
 
     /// <summary>What the approver is told. Safety only: a small model that is asked "does this fit the task?" rejects good work with made-up reasons.</summary>
     public const string DefaultApproverInstructions =
@@ -173,8 +175,8 @@ public class ToolLoop : IToolLoop
     {
         var system = (string.IsNullOrWhiteSpace(r.ApproverInstructions) ? DefaultApproverInstructions : r.ApproverInstructions.Trim()) + "\n\n" + ApproverReplyFormat;
         var args = ToolArgs.Limit(arguments.ToString(Newtonsoft.Json.Formatting.None), 4000);
-        // the call first, then only the start of the task: a long brief (roles, background) confuses a small model
-        var prompt = $"Tool call:\nTool: {name}\nArguments: {args}\n\nAllowed folder: {r.Context.Root ?? "(none)"}\nAllowed hosts: {(r.Context.AllowedHosts.Count == 0 ? "(none)" : string.Join(", ", r.Context.AllowedHosts))}\n\nTask given to the assistant (start of it):\n{Excerpt(r.Prompt, TaskExcerptChars)}";
+        // the call first, then the start and the end of the task: a long brief (roles, background) confuses a small model, and the real request is often last
+        var prompt = $"Tool call:\nTool: {name}\nArguments: {args}\n\nAllowed folder: {r.Context.Root ?? "(none)"}\nAllowed hosts: {(r.Context.AllowedHosts.Count == 0 ? "(none)" : string.Join(", ", r.Context.AllowedHosts))}\n\nTask given to the assistant{(r.Prompt.Trim().Length > TaskExcerptChars ? " (start and end of it)" : "")}:\n{Excerpt(r.Prompt)}";
         try
         {
             var answer = await _ollama.ChatAsync(r.Connection, new OllamaChatRequest(model, system, prompt, 0, 200, true, false), ApproverTimeout, ct);
@@ -193,7 +195,12 @@ public class ToolLoop : IToolLoop
         }
     }
 
-    private static string Excerpt(string text, int max) => text.Length <= max ? text.Trim() : text[..max].TrimEnd() + "…";
+    /// <summary>The whole task when short, else its start and its end with a marker for what was left out.</summary>
+    public static string Excerpt(string text)
+    {
+        text = text.Trim();
+        return text.Length <= TaskExcerptChars ? text : text[..TaskHeadChars].TrimEnd() + "\n[…]\n" + text[^TaskTailChars..].TrimStart();
+    }
 
     private static string ModelFacing(JObject record, IEnumerable<string> availableTools)
     {

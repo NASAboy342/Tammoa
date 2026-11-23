@@ -259,15 +259,28 @@ public class ToolLoopTest
     }
 
     [Test]
-    public void Approver_ALongBrief_IsCut_AndTheToolCallComesFirst()
+    public void Approver_ALongBrief_ShowsItsStartAndItsEnd_NotTheMiddle_AndTheToolCallComesFirst()
     {
-        var brief = "You are the Technical Manager of a big organisation. " + new string('x', 5000) + " THE-END-OF-THE-BRIEF";
+        var brief = "START-OF-THE-BRIEF You are the Technical Manager of a big organisation. " + new string('x', 5000) + " MIDDLE-MARKER " + new string('y', 5000) + " Please create the file tomato_run.html. END-OF-THE-BRIEF";
         var q = ApproverRequestOf(r => r with { Prompt = brief });
-        Assert.That(q.Prompt, Does.Not.Contain("THE-END-OF-THE-BRIEF"));
-        Assert.That(q.Prompt, Does.Contain("You are the Technical Manager").And.Contain("…"));
+        Assert.That(q.Prompt, Does.Contain("START-OF-THE-BRIEF").And.Contain("Please create the file tomato_run.html. END-OF-THE-BRIEF"));
+        Assert.That(q.Prompt, Does.Not.Contain("MIDDLE-MARKER"));
+        Assert.That(q.Prompt, Does.Contain("\n[…]\n").And.Contain("(start and end of it):"));
         Assert.That(q.Prompt.Length, Is.LessThan(ToolLoop.TaskExcerptChars + 600), "short, whatever the brief");
-        Assert.That(q.Prompt.IndexOf("Tool: write_file", StringComparison.Ordinal), Is.LessThan(q.Prompt.IndexOf("You are the Technical Manager", StringComparison.Ordinal)), "the call is shown before the task");
+        Assert.That(q.Prompt.IndexOf("Tool: write_file", StringComparison.Ordinal), Is.LessThan(q.Prompt.IndexOf("START-OF-THE-BRIEF", StringComparison.Ordinal)), "the call is shown before the task");
         Assert.That(q.Prompt, Does.Contain("Arguments: {\"path\":\"a.txt\"").And.Contain($"Allowed folder: {_root}"));
+    }
+
+    [Test]
+    public void Excerpt_AtTheBoundary_600IsWhole_601IsCut_AndTheCutKeepsHeadAndTail()
+    {
+        var whole = new string('a', ToolLoop.TaskExcerptChars);
+        Assert.That(ToolLoop.Excerpt(whole), Is.EqualTo(whole));
+        var cut = ToolLoop.Excerpt(whole + "b");
+        Assert.That(cut, Does.Contain("[…]"));
+        Assert.That(cut.Length, Is.LessThan(ToolLoop.TaskHeadChars + ToolLoop.TaskTailChars + 20));
+        Assert.That(cut, Does.StartWith(new string('a', ToolLoop.TaskHeadChars)).And.EndWith("ab"));
+        Assert.That(ToolLoop.Excerpt("  short task  "), Is.EqualTo("short task"), "trimmed");
     }
 
     [Test]
@@ -275,7 +288,8 @@ public class ToolLoopTest
     {
         var q = ApproverRequestOf();
         Assert.That(q.Prompt, Does.Contain("write hello to a.txt"));
-        Assert.That(q.Prompt, Does.Not.Contain("…"));
+        Assert.That(q.Prompt, Does.Not.Contain("…").And.Not.Contain("start and end of it"));
+        Assert.That(q.Prompt, Does.Contain("Task given to the assistant:\nwrite hello to a.txt"));
     }
 
     [Test]

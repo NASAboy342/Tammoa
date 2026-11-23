@@ -1,11 +1,13 @@
 import type { IconName } from '@/components/icons/icons'
+import { formatDuration } from './runHelpers'
 
 /** One tool call the AI card made, as the backend reports it (`toolCalls` in the card output and in the live view). */
 export interface ToolCall {
   step: number
   name: string
   arguments?: Record<string, unknown>
-  decision: 'ran' | 'rejected' | 'failed'
+  /** queued / approving / running only exist while the card is running (live view); the final output has ran / rejected / failed. */
+  decision: 'queued' | 'approving' | 'running' | 'ran' | 'rejected' | 'failed'
   /** For a refused call: a safety rule (folder, host, script check) or the approver model. */
   by?: 'rule' | 'approver'
   reason?: string
@@ -21,8 +23,24 @@ export const TOOL_ICON: Record<string, IconName> = {
 }
 export const toolIcon = (name: string): IconName => TOOL_ICON[name] ?? 'zap'
 
-export const DECISION_ICON: Record<ToolCall['decision'], IconName> = { ran: 'check-circle', rejected: 'stop', failed: 'alert' }
-export const DECISION_LABEL: Record<ToolCall['decision'], string> = { ran: 'Ran', rejected: 'Refused', failed: 'Failed' }
+export const DECISION_ICON: Record<ToolCall['decision'], IconName> = {
+  queued: 'clock',
+  approving: 'eye',
+  running: 'loader',
+  ran: 'check-circle',
+  rejected: 'stop',
+  failed: 'alert',
+}
+export const DECISION_LABEL: Record<ToolCall['decision'], string> = {
+  queued: 'Queued',
+  approving: 'Asking approver',
+  running: 'Running',
+  ran: 'Ran',
+  rejected: 'Refused',
+  failed: 'Failed',
+}
+/** A call that is not finished yet (only seen in the live view). */
+export const inFlight = (c: Pick<ToolCall, 'decision'>): boolean => c.decision === 'queued' || c.decision === 'approving' || c.decision === 'running'
 
 /** "Ran", "Failed", or for a refusal who refused: "Refused (rule)" / "Refused (approver)". */
 export function decisionLabel(c: Pick<ToolCall, 'decision' | 'by'>): string {
@@ -49,16 +67,49 @@ export function formatToolDuration(ms: number | undefined): string {
   return ms < 1000 ? `${Math.round(ms)} ms` : `${(ms / 1000).toFixed(1)} s`
 }
 
-/** Short summary of a list of calls: "3 calls: 2 ran, 1 refused". */
+/** Short summary of a list of calls: "3 calls: 2 ran, 1 refused", and what is still going on: "…, 1 running, 1 queued". */
 export function summarizeCalls(calls: ToolCall[]): string {
   if (!calls.length) return 'No tool calls'
   const count = (d: ToolCall['decision']) => calls.filter((c) => c.decision === d).length
-  const bits = [`${count('ran')} ran`, count('rejected') ? `${count('rejected')} refused` : '', count('failed') ? `${count('failed')} failed` : ''].filter(Boolean)
+  const bits = [
+    `${count('ran')} ran`,
+    count('rejected') ? `${count('rejected')} refused` : '',
+    count('failed') ? `${count('failed')} failed` : '',
+    count('approving') ? `${count('approving')} asking approver` : '',
+    count('running') ? `${count('running')} running` : '',
+    count('queued') ? `${count('queued')} queued` : '',
+  ].filter(Boolean)
   return `${calls.length} ${calls.length === 1 ? 'call' : 'calls'}: ${bits.join(', ')}`
 }
 
+// ---- what the card is waiting for right now (live view)
+export interface LivePhase {
+  kind: 'model' | 'approver' | 'tool'
+  step: number
+  name?: string
+  since: string
+}
+
+/** The `phase` of a live object, or null when it is missing or malformed. */
+export function phaseOf(live: unknown): LivePhase | null {
+  const p = (live as { phase?: Partial<LivePhase> } | null | undefined)?.phase
+  if (!p || (p.kind !== 'model' && p.kind !== 'approver' && p.kind !== 'tool') || typeof p.since !== 'string') return null
+  return { kind: p.kind, step: typeof p.step === 'number' ? p.step : 1, name: typeof p.name === 'string' ? p.name : undefined, since: p.since }
+}
+
+export const PHASE_ICON: Record<LivePhase['kind'], IconName> = { model: 'bot', approver: 'eye', tool: 'play' }
+
+export function phaseText(p: LivePhase): string {
+  if (p.kind === 'model') return p.step > 1 ? `Waiting for the model (step ${p.step})` : 'Waiting for the model'
+  if (p.kind === 'approver') return `Asking the approver about ${p.name ?? 'a tool call'}`
+  return `Running ${p.name ?? 'a tool'}`
+}
+
+/** How long the card has been in this phase ("3.4 s"); empty when the time is unknown. */
+export const phaseElapsed = (p: LivePhase, now?: number): string => formatDuration(p.since, undefined, now ?? Date.now())
+
 /** The full text of a call to read: the reason when it did not run, else the result. */
-export const callDetail = (c: ToolCall): string => (c.decision === 'ran' ? (c.result ?? '') : (c.reason ?? ''))
+export const callDetail = (c: ToolCall): string => (c.decision === 'ran' ? (c.result ?? '') : inFlight(c) ? '' : (c.reason ?? ''))
 
 // ---- which settings of the AI card matter for the tools ticked
 // TODO(backend-enhance): move this into the param descriptors (e.g. `showWhen`) so the UI stays free of card-specific code.

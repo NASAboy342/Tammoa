@@ -15,6 +15,13 @@ public class ToolLoopTest
     private ToolLoop _sut = null!;
     private readonly List<JArray> _messagesSeen = new();
     private Queue<OllamaTurnResult> _turns = null!;
+    private readonly List<JToken> _progress = new();
+    private readonly List<int> _progressCountAtModelCall = new();
+
+    private sealed class FixedTime(DateTimeOffset now) : TimeProvider
+    {
+        public override DateTimeOffset GetUtcNow() => now;
+    }
     private static JObject A(object o) => JObject.FromObject(o);
 
     private static Connection Conn() => new("c1", "Home", ConnectionProvider.Ollama, "http://x", null, DateTimeOffset.UtcNow, DateTimeOffset.UtcNow);
@@ -30,11 +37,14 @@ public class ToolLoopTest
         _root = Path.Combine(_base, "root");
         Directory.CreateDirectory(_root);
         _messagesSeen.Clear();
+        _progress.Clear();
+        _progressCountAtModelCall.Clear();
         _turns = new Queue<OllamaTurnResult>();
         _ollama = Substitute.For<IOllamaClient>();
         _ollama.ChatTurnAsync(default!, default!, default, default, default).ReturnsForAnyArgs(ci =>
         {
             _messagesSeen.Add((JArray)((OllamaTurnRequest)ci[1]).Messages.DeepClone());
+            lock (_progress) _progressCountAtModelCall.Add(_progress.Count);
             return Task.FromResult(_turns.Dequeue());
         });
         var http = Substitute.For<IHttpRequestRunner>();
@@ -320,5 +330,105 @@ public class ToolLoopTest
         Assert.That((string)call["by"]!, Is.EqualTo("approver"));
         Assert.That((string)call["reason"]!, Is.EqualTo("The approver's answer could not be read."));
         Assert.That((string)_messagesSeen[1][^1]["content"]!, Does.Contain("was NOT done"));
+    }
+
+    // ---- live view: what we are waiting for, and the stages of every call
+    private static string Stage(JToken live, int call) => (string)live["toolCalls"]![call]!["decision"]!;
+    private List<string> StagesOf(int call) => _progress.Where(p => ((JArray)p["toolCalls"]!).Count > call).Select(p => Stage(p, call)).Aggregate(new List<string>(), (l, x) => { if (l.Count == 0 || l[^1] != x) l.Add(x); return l; });
+
+    [Test]
+    public async Task Live_TheModelPhaseIsReported_BeforeTheModelHasAnswered_WithAStartTime()
+    {
+        var at = new DateTimeOffset(2026, 11, 23, 10, 0, 0, TimeSpan.Zero);
+        var sut = new ToolLoop(_ollama, new ToolRegistry([new ReadFileTool(), new WriteFileTool()]), new FixedTime(at));
+        _turns.Enqueue(Call((ToolIds.WriteFile, new { path = "a.txt", content = "x" })));
+        _turns.Enqueue(Say("done"));
+        await sut.RunAsync(Req(), _progress.Add, default);
+
+        Assert.That(_progressCountAtModelCall[0], Is.GreaterThanOrEqualTo(1), "a snapshot was already reported when the first model call started");
+        var first = _progress[0];
+        Assert.That((string)first["phase"]!["kind"]!, Is.EqualTo("model"));
+        Assert.That((int)first["phase"]!["step"]!, Is.EqualTo(1));
+        Assert.That(DateTimeOffset.Parse((string)first["phase"]!["since"]!), Is.EqualTo(at));
+        Assert.That(_progressCountAtModelCall[1], Is.GreaterThan(_progressCountAtModelCall[0]), "and again before the second model call");
+        var second = _progress[_progressCountAtModelCall[1] - 1];
+        Assert.That((int)second["phase"]!["step"]!, Is.EqualTo(2));
+    }
+
+    [Test]
+    public async Task Live_CallsOfOneTurnAppearTogetherAsQueued_ThenRunOneByOne_WithoutAnApprover()
+    {
+        _turns.Enqueue(Call((ToolIds.WriteFile, new { path = "a.txt", content = "1" }), (ToolIds.WriteFile, new { path = "b.txt", content = "2" })));
+        _turns.Enqueue(Say("done"));
+        await _sut.RunAsync(Req(), _progress.Add, default);
+
+        var together = _progress.First(p => ((JArray)p["toolCalls"]!).Count == 2);
+        Assert.That(Stage(together, 0), Is.EqualTo("queued"));
+        Assert.That(Stage(together, 1), Is.EqualTo("queued"));
+        Assert.That(((JArray)together["toolCalls"]!)[0]["arguments"]!["path"]!.ToString(), Is.EqualTo("a.txt"), "the arguments are visible while queued");
+        Assert.That(StagesOf(0), Is.EqualTo(new[] { "queued", "running", "ran" }));
+        Assert.That(StagesOf(1), Is.EqualTo(new[] { "queued", "running", "ran" }));
+        // the second call only starts running after the first one is done
+        var firstRunningOfSecond = _progress.First(p => ((JArray)p["toolCalls"]!).Count == 2 && Stage(p, 1) == "running");
+        Assert.That(Stage(firstRunningOfSecond, 0), Is.EqualTo("ran"));
+        Assert.That((string)firstRunningOfSecond["phase"]!["kind"]!, Is.EqualTo("tool"));
+        Assert.That((string)firstRunningOfSecond["phase"]!["name"]!, Is.EqualTo("write_file"));
+    }
+
+    [Test]
+    public async Task Live_WithAnApprover_ACallIsApprovingBeforeItRuns_AndThePhaseIsTheApprover()
+    {
+        ApproverSays("{\"reason\": \"fine\", \"approve\": true}");
+        _turns.Enqueue(Call((ToolIds.WriteFile, new { path = "a.txt", content = "1" })));
+        _turns.Enqueue(Say("done"));
+        await _sut.RunAsync(Req(approver: "small"), _progress.Add, default);
+        Assert.That(StagesOf(0), Is.EqualTo(new[] { "queued", "approving", "running", "ran" }));
+        var approving = _progress.First(p => ((JArray)p["toolCalls"]!).Count == 1 && Stage(p, 0) == "approving");
+        Assert.That((string)approving["phase"]!["kind"]!, Is.EqualTo("approver"));
+        Assert.That((string)approving["phase"]!["name"]!, Is.EqualTo("write_file"));
+    }
+
+    [Test]
+    public async Task Live_ACallRefusedByARule_NeverShowsRunningOrApproving()
+    {
+        ApproverSays("{\"reason\": \"fine\", \"approve\": true}");
+        _turns.Enqueue(Call((ToolIds.WriteFile, new { path = "../evil.txt", content = "x" })));
+        _turns.Enqueue(Say("done"));
+        await _sut.RunAsync(Req(approver: "small"), _progress.Add, default);
+        Assert.That(StagesOf(0), Is.EqualTo(new[] { "queued", "rejected" }));
+    }
+
+    [Test]
+    public async Task Live_TheFinalOutput_HasNoPhase_AndOnlyFinalDecisions()
+    {
+        _turns.Enqueue(Call((ToolIds.WriteFile, new { path = "a.txt", content = "1" }), (ToolIds.ReadFile, new { path = "missing.txt" }), (ToolIds.WriteFile, new { path = "../x.txt", content = "x" })));
+        _turns.Enqueue(Say("done"));
+        var o = await _sut.RunAsync(Req(), _progress.Add, default);
+        Assert.That(o["phase"], Is.Null);
+        Assert.That(((JArray)o["toolCalls"]!).Select(c => (string)c["decision"]!), Is.EqualTo(new[] { "ran", "failed", "rejected" }));
+        Assert.That(((JArray)o["toolCalls"]!).Select(c => (int)c["step"]!), Is.All.EqualTo(1));
+    }
+
+    [Test]
+    public async Task Refusals_TellTheModelWhichToolsItCanUse_ForBothKindsOfRefusal()
+    {
+        ApproverSays("{\"reason\": \"no\", \"approve\": false}");
+        _turns.Enqueue(Call((ToolIds.WriteFile, new { path = "../evil.txt", content = "x" })));   // a rule says no
+        _turns.Enqueue(Call((ToolIds.WriteFile, new { path = "ok.txt", content = "x" })));        // the approver says no
+        _turns.Enqueue(Say("done"));
+        await _sut.RunAsync(Req(approver: "small"), null, default);
+        Assert.That((string)_messagesSeen[1][^1]["content"]!, Does.StartWith("Refused by a safety rule, so it was NOT done").And.EndWith("Tools you can use: read_file, write_file."));
+        Assert.That((string)_messagesSeen[2][^1]["content"]!, Does.StartWith("A reviewer refused this call, so it was NOT done").And.EndWith("Tools you can use: read_file, write_file."));
+    }
+
+    [Test]
+    public void ToolDescriptions_SayWhatEachToolIsFor_AndWhatRunScriptIsNot()
+    {
+        var write = new WriteFileTool().Definition.Description;
+        Assert.That(write, Does.Contain("create or update any file").And.Contain("HTML"));
+        var script = new RunScriptTool(Substitute.For<IProcessRunner>()).Definition.Description;
+        Assert.That(script, Does.Contain("NOT in a browser").And.Contain("never use it to run web pages or games").And.Contain("use write_file"));
+        Assert.That(new ReadFileTool().Definition.Description, Does.Contain("already exists"));
+        Assert.That(new HttpRequestTool(Substitute.For<IHttpRequestRunner>()).Definition.Description, Does.Contain("web page or call an API"));
     }
 }

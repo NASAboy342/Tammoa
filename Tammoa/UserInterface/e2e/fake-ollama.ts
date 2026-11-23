@@ -12,14 +12,17 @@ export interface Seen {
  * A tiny stand-in for an Ollama server, so the connection and Ollama card flows are tested without a real model.
  * /api/chat STREAMS (newline-delimited JSON, like the real one). With `hold: true` it sends the first pieces at once and then WAITS
  * until the test calls release(): that makes "the answer is visible while the model is still writing" deterministic.
+ * With `holdToolCalls` the model stays SILENT (like the real one while it writes a tool call) until the test calls releaseToolCalls().
  * With `toolScript` (and a request that offers tools) the model first asks for the scripted tool calls, one list per model call, then answers.
  */
-export async function startFakeOllama(options: { key?: string; models?: string[]; hold?: boolean; toolScript?: { name: string; arguments: Record<string, unknown> }[][] } = {}) {
+export async function startFakeOllama(options: { key?: string; models?: string[]; hold?: boolean; holdToolCalls?: boolean; toolScript?: { name: string; arguments: Record<string, unknown> }[][] } = {}) {
   const seen: Seen[] = []
   const models = options.models ?? ['tiny:1b', 'big:70b']
   let release: () => void = () => {}
   let released = !options.hold
   const gate = new Promise<void>((resolve) => (release = () => ((released = true), resolve())))
+  let releaseTools: () => void = () => {}
+  const toolGate = options.holdToolCalls ? new Promise<void>((resolve) => (releaseTools = resolve)) : Promise.resolve()
   let aborted = 0
   let finished = 0
 
@@ -43,6 +46,7 @@ export async function startFakeOllama(options: { key?: string; models?: string[]
           const step = body.messages.filter((m: any) => m.role === 'assistant').length
           const calls = options.toolScript[step]
           if (calls) {
+            await toolGate
             res.writeHead(200, { 'Content-Type': 'application/x-ndjson' })
             res.write(JSON.stringify({ model: body.model, message: { role: 'assistant', content: '', tool_calls: calls.map((c) => ({ function: { name: c.name, arguments: c.arguments } })) }, done: false }) + '\n')
             res.end(JSON.stringify({ model: body.model, message: { role: 'assistant', content: '' }, done: true, done_reason: 'stop', prompt_eval_count: 3, eval_count: 2, total_duration: 500_000_000 }) + '\n')
@@ -81,9 +85,11 @@ export async function startFakeOllama(options: { key?: string; models?: string[]
     chats: () => seen.filter((s) => s.path === '/api/chat'),
     /** Lets a held answer finish. */
     release: () => release(),
+    /** Lets a held tool call (the model's silence) come through. */
+    releaseToolCalls: () => releaseTools(),
     /** How many chat streams the client abandoned before they finished (e.g. a cancelled run). */
     aborted: () => aborted,
     finished: () => finished,
-    close: () => { release(); return new Promise<void>((resolve) => { server.closeAllConnections?.(); server.close(() => resolve()) }) },
+    close: () => { release(); releaseTools(); return new Promise<void>((resolve) => { server.closeAllConnections?.(); server.close(() => resolve()) }) },
   }
 }

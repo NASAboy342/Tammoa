@@ -101,7 +101,7 @@ const hasData = (id: InspectorTab) => (id === 'input' ? realInput.value !== unde
         <ExpandableText :text="run.error" :lines="4" strong />
       </div>
       <!-- what a running card has produced so far (an AI model's thinking and answer), visible in every tab -->
-      <LiveOutput v-if="run.status === 'running' && run.live" :live="run.live" />
+      <LiveOutput v-if="run.status === 'running' && run.live" :live="run.live" :now="now" />
     </div>
 
     <div class="flex gap-1 border-b border-line" role="tablist" aria-label="Card details">

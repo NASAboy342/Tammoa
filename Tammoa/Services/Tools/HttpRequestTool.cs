@@ -11,7 +11,7 @@ public class HttpRequestTool : ITool
     public HttpRequestTool(IHttpRequestRunner http) => _http = http;
 
     public ToolDefinition Definition { get; } = new(ToolIds.HttpRequest,
-        "Sends an HTTP request to one of the allowed hosts and returns the status and the response text. Redirects are not followed.",
+        "Sends an HTTP request to one of the allowed hosts (to fetch a web page or call an API) and returns the status and the response text. Redirects are not followed.",
         ToolArgs.Schema(new JObject
         {
             ["url"] = ToolArgs.Prop("Full http(s) URL."),

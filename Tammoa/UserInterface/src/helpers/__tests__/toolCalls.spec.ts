@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { DECISION_ICON, TOOL_ICON, callDetail, decisionLabel, formatToolDuration, paramVisible, summarizeArgs, summarizeCalls, toggleValue, toolCallsOf, toolIcon, type ToolCall } from '../toolCalls'
+import { DECISION_ICON, DECISION_LABEL, PHASE_ICON, TOOL_ICON, callDetail, decisionLabel, inFlight, phaseElapsed, phaseOf, phaseText, formatToolDuration, paramVisible, summarizeArgs, summarizeCalls, toggleValue, toolCallsOf, toolIcon, type ToolCall } from '../toolCalls'
 import { ICONS } from '@/components/icons/icons'
 
 const call = (decision: ToolCall['decision'], extra: Partial<ToolCall> = {}): ToolCall => ({ step: 1, name: 'write_file', decision, ...extra })
@@ -92,4 +92,47 @@ describe('toggleValue', () => {
     expect(toggleValue('junk', 'c', order)).toEqual(['c'])
   })
   it('keeps a saved value the options no longer offer', () => expect(toggleValue(['old'], 'a', order)).toEqual(['a', 'old']))
+})
+
+describe('live stages', () => {
+  it('every stage has an icon that exists and a label', () => {
+    for (const d of ['queued', 'approving', 'running', 'ran', 'rejected', 'failed'] as const) {
+      expect(DECISION_ICON[d] in ICONS, d).toBe(true)
+      expect(DECISION_LABEL[d].length, d).toBeGreaterThan(0)
+    }
+    for (const n of Object.values(PHASE_ICON)) expect(n in ICONS, n).toBe(true)
+  })
+  it('knows which calls are still going on', () => {
+    expect(['queued', 'approving', 'running'].every((d) => inFlight({ decision: d as ToolCall['decision'] }))).toBe(true)
+    expect(['ran', 'rejected', 'failed'].some((d) => inFlight({ decision: d as ToolCall['decision'] }))).toBe(false)
+  })
+  it('summarises calls that are still going on', () => {
+    expect(summarizeCalls([call('ran'), call('running'), call('queued'), call('queued')])).toBe('4 calls: 1 ran, 1 running, 2 queued')
+    expect(summarizeCalls([call('approving')])).toBe('1 call: 0 ran, 1 asking approver')
+  })
+  it('has no detail text for a call that is not finished', () => expect(callDetail(call('running', { reason: 'x', result: 'y' }))).toBe(''))
+  it('labels a running call', () => expect(decisionLabel(call('running'))).toBe('Running'))
+})
+
+describe('phase', () => {
+  const since = '2026-01-01T00:00:00.000Z'
+  it('reads a phase from a live object and ignores anything malformed', () => {
+    expect(phaseOf({ phase: { kind: 'model', step: 2, since } })).toEqual({ kind: 'model', step: 2, name: undefined, since })
+    expect(phaseOf({ phase: { kind: 'tool', step: 1, name: 'write_file', since } })?.name).toBe('write_file')
+    expect(phaseOf({ phase: { kind: 'nope', since } })).toBeNull()
+    expect(phaseOf({ phase: { kind: 'model' } })).toBeNull()
+    expect(phaseOf({})).toBeNull()
+    expect(phaseOf(null)).toBeNull()
+    expect(phaseOf({ phase: { kind: 'model', since } })?.step).toBe(1)
+  })
+  it('says what the card is waiting for', () => {
+    expect(phaseText({ kind: 'model', step: 1, since })).toBe('Waiting for the model')
+    expect(phaseText({ kind: 'model', step: 3, since })).toBe('Waiting for the model (step 3)')
+    expect(phaseText({ kind: 'approver', step: 1, name: 'write_file', since })).toBe('Asking the approver about write_file')
+    expect(phaseText({ kind: 'tool', step: 1, name: 'run_script', since })).toBe('Running run_script')
+  })
+  it('measures how long it has been waiting', () => {
+    expect(phaseElapsed({ kind: 'model', step: 1, since }, new Date('2026-01-01T00:00:12.000Z').getTime())).toBe('12.0 s')
+    expect(phaseElapsed({ kind: 'model', step: 1, since: 'garbage' }, 5)).toBe('')
+  })
 })

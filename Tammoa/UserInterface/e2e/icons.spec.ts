@@ -313,8 +313,9 @@ test('AI tool settings (ticked tools, warning) and the tool call list (live and 
     expect(await withoutIcon(page), 'tool settings with every tool ticked').toEqual([])
 
     await page.getByTestId('run').click()
+    await expect(page.getByTestId('live-phase')).toBeVisible()
     await expect(page.getByTestId('live-tool-calls')).toBeVisible()
-    expect(await withoutIcon(page), 'live tool calls').toEqual([])
+    expect(await withoutIcon(page), 'live phase and tool calls').toEqual([])
     fake.release()
     await expect(page.getByTestId('node-a')).toHaveAttribute('data-status', 'succeeded')
     await page.getByTestId('inspector-tab-output').click()

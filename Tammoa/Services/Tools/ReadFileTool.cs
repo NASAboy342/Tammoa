@@ -10,7 +10,7 @@ public class ReadFileTool : ITool
     public const int MaxBytes = 256 * 1024;
 
     public ToolDefinition Definition { get; } = new(ToolIds.ReadFile,
-        "Reads a UTF-8 text file inside the allowed folder and returns its text. Use a path relative to the allowed folder.",
+        "Reads a UTF-8 text file inside the allowed folder and returns its text. Use it to look at a file that already exists (to check or continue your work). Use a path relative to the allowed folder.",
         ToolArgs.Schema(new JObject { ["path"] = ToolArgs.Prop("File path, relative to the allowed folder.") }, "path"));
 
     public bool NeedsRoot => true;

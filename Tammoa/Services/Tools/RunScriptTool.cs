@@ -13,7 +13,7 @@ public class RunScriptTool : ITool
     public RunScriptTool(IProcessRunner runner) => _runner = runner;
 
     public ToolDefinition Definition { get; } = new(ToolIds.RunScript,
-        "Runs a short script in the allowed folder (it is the working directory; use relative paths only) and returns its output and exit code.",
+        "Runs a short script (shell, Node.js javascript or Python) in the allowed folder (it is the working directory; use relative paths only) and returns its output and exit code. It runs on the computer, NOT in a browser: never use it to run web pages or games, and do not use it to create files (use write_file for that).",
         ToolArgs.Schema(new JObject
         {
             ["language"] = new JObject { ["type"] = "string", ["enum"] = new JArray("shell", "javascript", "python"), ["description"] = "shell (default), javascript (node) or python." },

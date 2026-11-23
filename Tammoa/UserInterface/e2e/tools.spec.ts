@@ -153,3 +153,43 @@ test.describe('AI tools: a run', () => {
     }
   })
 })
+
+test.describe('AI tools: the live action', () => {
+  test('while the model is silent the card says it is waiting (with a timer); the call then appears and is seen running; the stages end in Ran', async ({ page, request }) => {
+    const base = fs.mkdtempSync(path.join(os.tmpdir(), 'tammoa-e2e-live-'))
+    const fake = await startFakeOllama({ holdToolCalls: true, toolScript: [[{ name: 'run_script', arguments: { language: 'shell', code: 'sleep 2; echo hello' } }]] })
+    try {
+      const flow = await aiFlow(request, fake.url, { tools: ['run_script'], toolRoot: base })
+      await open(page, flow.id)
+      await node(page, 'ai').click()
+      await page.getByTestId('run').click()
+
+      // 1. the model is silent: no tool call yet, but the card shows what it waits for, with a running timer
+      await expect(page.getByTestId('live-phase')).toHaveAttribute('data-phase', 'model')
+      await expect(page.getByTestId('live-phase-text')).toHaveText('Waiting for the model')
+      await expect(page.getByTestId('live-phase-hint')).toContainText('sends nothing while it writes a tool call')
+      await expect(page.getByTestId('live-tool-calls')).toHaveCount(0)
+      const first = await page.getByTestId('live-phase-elapsed').innerText()
+      await expect.poll(async () => page.getByTestId('live-phase-elapsed').innerText(), { message: 'the timer ticks' }).not.toBe(first)
+
+      // 2. the call arrives: visible at once with its arguments, then seen running (the script sleeps 2 s)
+      fake.releaseToolCalls()
+      const row = page.getByTestId('live-tool-calls').getByTestId('tool-call-0')
+      await expect(row).toHaveAttribute('data-decision', 'running')
+      await expect(row).toContainText('sleep 2')
+      await expect(page.getByTestId('live-phase')).toHaveAttribute('data-phase', 'tool')
+      await expect(page.getByTestId('live-phase-text')).toHaveText('Running run_script')
+      await expect(page.getByTestId('tool-calls-summary')).toContainText('1 running')
+
+      // 3. it finishes
+      await expect(node(page, 'ai')).toHaveAttribute('data-status', 'succeeded', { timeout: 20_000 })
+      await openTab(page, 'output')
+      await expect(page.getByTestId('output-tool-calls').getByTestId('tool-call-0')).toHaveAttribute('data-decision', 'ran')
+      await expect(page.getByTestId('output-tool-calls')).toContainText('hello')
+      await expect(page.getByTestId('live-phase')).toHaveCount(0) // no phase once the card is done
+    } finally {
+      await fake.close()
+      fs.rmSync(base, { recursive: true, force: true })
+    }
+  })
+})

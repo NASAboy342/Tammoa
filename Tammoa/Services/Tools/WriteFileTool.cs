@@ -8,7 +8,7 @@ namespace Tammoa.Services.Tools;
 public class WriteFileTool : ITool
 {
     public ToolDefinition Definition { get; } = new(ToolIds.WriteFile,
-        "Writes text to a file inside the allowed folder (folders are created). mode 'overwrite' replaces the file, 'append' adds to its end.",
+        "Saves text to a file inside the allowed folder. Use this to create or update any file (code, HTML, notes). Folders are created. mode 'overwrite' replaces the file, 'append' adds to its end.",
         ToolArgs.Schema(new JObject
         {
             ["path"] = ToolArgs.Prop("File path, relative to the allowed folder."),

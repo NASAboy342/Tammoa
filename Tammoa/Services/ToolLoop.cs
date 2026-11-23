@@ -30,11 +30,13 @@ public class ToolLoop : IToolLoop
     private static readonly TimeSpan ApproverTimeout = TimeSpan.FromSeconds(60);
     private readonly IOllamaClient _ollama;
     private readonly IToolRegistry _tools;
+    private readonly TimeProvider _time;
 
-    public ToolLoop(IOllamaClient ollama, IToolRegistry tools)
+    public ToolLoop(IOllamaClient ollama, IToolRegistry tools, TimeProvider? time = null)
     {
         _ollama = ollama;
         _tools = tools;
+        _time = time ?? TimeProvider.System;
     }
 
     public async Task<JObject> RunAsync(ToolLoopRequest r, Action<JToken>? progress, CancellationToken ct)
@@ -55,24 +57,33 @@ public class ToolLoop : IToolLoop
         var thinking = new System.Text.StringBuilder();
         int? promptTokens = null, responseTokens = null;
         double? durationMs = null;
-        void Report(string text) // the state so far, shown live on the card
+
+        // ---- what the card shows while it runs: the text so far, the calls with their stage, and what we are waiting for right now.
+        // Ollama sends NOTHING while a model writes a tool call (then the whole call arrives at once), so "phase + since" is what lets the UI
+        // show "waiting for the model, 12 s" instead of a bare spinner.
+        JObject? phase = null;
+        void SetPhase(string kind, int step, string? name = null)
+        {
+            phase = new JObject { ["kind"] = kind, ["step"] = step, ["since"] = _time.GetUtcNow().UtcDateTime.ToString("o") };
+            if (name is not null) phase["name"] = name;
+        }
+        JObject Live(string text, string thinkingText)
         {
             var live = new JObject { ["text"] = text, ["toolCalls"] = records.DeepClone() };
-            if (thinking.Length > 0) live["thinking"] = thinking.ToString();
-            progress?.Invoke(live);
+            if (thinkingText.Length > 0) live["thinking"] = thinkingText;
+            if (phase is not null) live["phase"] = phase.DeepClone();
+            return live;
         }
+        void Report(string text) => progress?.Invoke(Live(text, thinking.ToString()));
 
+        var lastText = "";
         for (var step = 1; step <= r.MaxSteps; step++)
         {
             var before = thinking.Length;
+            SetPhase("model", step);
+            Report(lastText); // at once: the UI starts its "waiting for the model" timer before the first byte arrives
             var turn = await _ollama.ChatTurnAsync(r.Connection, new OllamaTurnRequest(r.Model, messages, schemas, r.Temperature, r.MaxTokens, r.Think), r.Timeout, ct,
-                (thinkingSoFar, textSoFar) =>
-                {
-                    var live = new JObject { ["text"] = textSoFar, ["toolCalls"] = records.DeepClone() };
-                    var all = thinking.ToString(0, before) + thinkingSoFar;
-                    if (all.Length > 0) live["thinking"] = all;
-                    progress?.Invoke(live);
-                });
+                (thinkingSoFar, textSoFar) => progress?.Invoke(Live(textSoFar, thinking.ToString(0, before) + thinkingSoFar)));
             var chat = turn.Chat;
             if (chat.Thinking is not null) thinking.Append(chat.Thinking);
             promptTokens = Sum(promptTokens, chat.PromptTokens);
@@ -81,6 +92,7 @@ public class ToolLoop : IToolLoop
 
             if (turn.ToolCalls.Count == 0)
             {
+                phase = null;
                 var output = new JObject { ["text"] = chat.Text, ["model"] = chat.Model, ["done"] = chat.Done };
                 if (thinking.Length > 0) output["thinking"] = thinking.ToString();
                 if (chat.DoneReason is not null) output["doneReason"] = chat.DoneReason;
@@ -101,28 +113,44 @@ public class ToolLoop : IToolLoop
                 ["content"] = chat.Text,
                 ["tool_calls"] = new JArray(turn.ToolCalls.Select(c => new JObject { ["function"] = new JObject { ["name"] = c.Name, ["arguments"] = c.Arguments.DeepClone() } })),
             });
-            foreach (var (name, arguments) in turn.ToolCalls)
+            lastText = chat.Text;
+
+            // every call of this turn is visible at once (queued), then each one moves through approving -> running -> its result
+            var batch = turn.ToolCalls.Select(c => new JObject { ["step"] = step, ["name"] = c.Name, ["arguments"] = c.Arguments.DeepClone(), ["decision"] = "queued" }).ToList();
+            foreach (var record in batch) records.Add(record);
+            Report(lastText);
+            foreach (var record in batch)
             {
-                var record = await RunToolAsync(r, selected, step, name, arguments, ct);
-                records.Add(record);
-                messages.Add(new JObject { ["role"] = "tool", ["tool_name"] = name, ["content"] = ModelFacing(record) });
-                Report(chat.Text);
+                await RunToolAsync(r, selected, record, (decision, kind) =>
+                {
+                    record["decision"] = decision;
+                    SetPhase(kind, step, (string)record["name"]!);
+                    Report(lastText);
+                }, ct);
+                messages.Add(new JObject { ["role"] = "tool", ["tool_name"] = (string)record["name"]!, ["content"] = ModelFacing(record, selected.Keys) });
+                Report(lastText);
             }
         }
         throw new InvalidOperationException("The tool loop ended without an answer."); // not reachable: the last step returns or throws
     }
 
-    private async Task<JObject> RunToolAsync(ToolLoopRequest r, Dictionary<string, ITool> selected, int step, string name, JObject arguments, CancellationToken ct)
+    /// <summary>Runs one queued call and turns its record into the final one (ran / rejected / failed). `enter(decision, phaseKind)` announces the stage it is in.</summary>
+    private async Task RunToolAsync(ToolLoopRequest r, Dictionary<string, ITool> selected, JObject record, Action<string, string> enter, CancellationToken ct)
     {
-        var record = new JObject { ["step"] = step, ["name"] = name, ["arguments"] = arguments.DeepClone() };
+        var name = (string)record["name"]!;
+        var arguments = (JObject)record["arguments"]!;
         var clock = Stopwatch.StartNew();
         try
         {
             if (!selected.TryGetValue(name, out var tool))
                 throw new ArgumentException($"There is no tool '{name}'. Available tools: {string.Join(", ", selected.Keys)}.");
             tool.Check(arguments, r.Context); // the rules first: a call that breaks them never reaches the approver
-            if (r.ApproverModel is { Length: > 0 } approver && await AskApproverAsync(r, approver, name, arguments, ct) is { } refusal)
-                throw new ApproverRefused(refusal);
+            if (r.ApproverModel is { Length: > 0 } approver)
+            {
+                enter("approving", "approver");
+                if (await AskApproverAsync(r, approver, name, arguments, ct) is { } refusal) throw new ApproverRefused(refusal);
+            }
+            enter("running", "tool");
             record["result"] = ToolArgs.Limit(await tool.RunAsync(arguments, r.Context, ct), ResultCap);
             record["decision"] = "ran";
         }
@@ -138,7 +166,6 @@ public class ToolLoop : IToolLoop
             record["reason"] = ex.Message;
         }
         record["durationMs"] = Math.Round(clock.Elapsed.TotalMilliseconds, 1);
-        return record;
     }
 
     /// <summary>Asks the small model. Returns null when approved, else the reason. Anything unclear counts as "no".</summary>
@@ -168,14 +195,18 @@ public class ToolLoop : IToolLoop
 
     private static string Excerpt(string text, int max) => text.Length <= max ? text.Trim() : text[..max].TrimEnd() + "…";
 
-    private static string ModelFacing(JObject record) => (string?)record["decision"] switch
+    private static string ModelFacing(JObject record, IEnumerable<string> availableTools)
     {
-        "ran" => (string)record["result"]!,
-        "rejected" when (string?)record["by"] == "approver" =>
-            $"A reviewer refused this call, so it was NOT done. Reason: {(string?)record["reason"]} Change the call, or tell the user what you could not do. Do not say it was done.",
-        "rejected" => $"Refused by a safety rule, so it was NOT done: {(string?)record["reason"]}",
-        _ => "error: " + (string?)record["reason"],
-    };
+        var tools = $" Tools you can use: {string.Join(", ", availableTools)}.";
+        return (string?)record["decision"] switch
+        {
+            "ran" => (string)record["result"]!,
+            "rejected" when (string?)record["by"] == "approver" =>
+                $"A reviewer refused this call, so it was NOT done. Reason: {(string?)record["reason"]} Change the call, or tell the user what you could not do. Do not say it was done.{tools}",
+            "rejected" => $"Refused by a safety rule, so it was NOT done: {(string?)record["reason"]}{tools}",
+            _ => "error: " + (string?)record["reason"],
+        };
+    }
 
     private static string Used(JArray records) => records.Count == 0 ? "none" : string.Join(", ", records.Select(x => (string)x["name"]!).Distinct());
     private static int? Sum(int? a, int? b) => a is null && b is null ? null : (a ?? 0) + (b ?? 0);

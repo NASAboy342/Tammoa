@@ -44,6 +44,8 @@ public class OllamaCard : ICardType
                 Help: "Required for the file and script tools. They can only touch this folder (and below); anything else is refused. Absolute path, the folder must exist."),
             new CardParamInfo("allowedHosts", "Allowed hosts (HTTP tool)", ParamKind.Text, Placeholder: "api.example.com, *.example.org",
                 Help: "Comma separated. The HTTP tool only talks to these hosts; empty = the HTTP tool refuses everything."),
+            new CardParamInfo("limitPageNetwork", "Limit web pages to the allowed hosts", ParamKind.Bool, DefaultValue: false,
+                Help: "For the Check web page tool. Off: the page may load anything from the internet (a CDN script, for example). On: it can only reach the allowed hosts, and a script from another host fails to load."),
             new CardParamInfo("maxSteps", "Max steps", ParamKind.Number, DefaultValue: 8, Help: "1 to 30 model calls. A step is one question to the model; it stops the loop when the model keeps asking for tools."),
             new CardParamInfo("approverModel", "Approver model (optional)", ParamKind.Select, OptionsSource: "ollama.models", OptionsDependsOn: "connection",
                 Help: "A small model that must approve every tool call first (it sees the task, the tool and its arguments). Empty = no approval. A refused call is told to the main model, which can try something else."),
@@ -122,7 +124,7 @@ public class OllamaCard : ICardType
             var approver = ParamReader.GetString(context.Params, "approverModel").Trim();
 
             return (await _loop.RunAsync(new ToolLoopRequest(connection, model, system, prompt, temperature, maxTokens is { } mt ? (int)mt : null, think, TimeSpan.FromSeconds(seconds),
-                toolIds, new ToolContext(root, hosts), approver.Length > 0 ? approver : null, maxSteps,
+                toolIds, new ToolContext(root, hosts, ParamReader.GetBool(context.Params, "limitPageNetwork", false)), approver.Length > 0 ? approver : null, maxSteps,
                 ParamReader.GetString(context.Params, "approverPrompt").Trim() is { Length: > 0 } custom ? custom : null), context.Progress, ct));
         }
 

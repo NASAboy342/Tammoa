@@ -71,7 +71,10 @@ describe('paramVisible', () => {
     expect(paramVisible('allowedHosts', { tools: ['http_request'] })).toBe(true)
     expect(paramVisible('allowedHosts', { tools: ['write_file'] })).toBe(false)
     expect(paramVisible('toolRoot', { tools: ['check_page'] })).toBe(true)
-    expect(paramVisible('allowedHosts', { tools: ['check_page'] })).toBe(true) // a page may load scripts from allowed hosts
+    expect(paramVisible('allowedHosts', { tools: ['check_page'] })).toBe(false) // pages reach any host unless limited
+    expect(paramVisible('allowedHosts', { tools: ['check_page'], limitPageNetwork: true })).toBe(true)
+    expect(paramVisible('limitPageNetwork', { tools: ['check_page'] })).toBe(true)
+    expect(paramVisible('limitPageNetwork', { tools: ['http_request'] })).toBe(false)
     expect(paramVisible('maxSteps', { tools: ['http_request'] })).toBe(true)
     expect(paramVisible('approverModel', { tools: ['run_script'] })).toBe(true)
     expect(paramVisible('toolRoot', { tools: 'read_file' })).toBe(false) // not an array: nothing selected

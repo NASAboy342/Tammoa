@@ -92,20 +92,24 @@ public class CheckPageToolTest
         Assert.That(allowed, Does.Contain("fonts.example.org").And.Contain("blocked").And.Not.Contain("cdn.jsdelivr.net, "));
         Assert.That(CheckPageTool.Summarize("", "", html, ["*.example.org", "cdn.jsdelivr.net"]), Does.Not.Contain("blocked"));
         Assert.That(CheckPageTool.Summarize("", "", html, []), Does.Contain("cdn.jsdelivr.net").And.Contain("fonts.example.org"));
+        Assert.That(CheckPageTool.Summarize("", "", html, null), Does.Not.Contain("blocked"), "no limit: nothing is blocked");
     }
 
     [Test]
-    public async Task TheBrowserIsStartedHeadless_WithTheFileUrl_AndTheNetworkClosedExceptForAllowedHosts()
+    public async Task TheBrowserIsStartedHeadless_WithTheFileUrl_AndWhenLimited_TheNetworkIsClosedExceptForAllowedHosts()
     {
         var sut = new CheckPageTool(Runner("", "", out var commands), () => "/Apps/Google Chrome");
-        await sut.RunAsync(A(new { path = "game.html" }), new ToolContext(_root, ["cdn.jsdelivr.net", "*.docs.test"]), default);
+        await sut.RunAsync(A(new { path = "game.html" }), new ToolContext(_root, ["cdn.jsdelivr.net", "*.docs.test"], true), default);
         var c = commands.Single();
         Assert.That(c, Does.StartWith("\"/Apps/Google Chrome\" ").And.Contain("--headless=new").And.Contain("--dump-dom"));
         Assert.That(c, Does.Contain("--proxy-server=http://127.0.0.1:9").And.Contain("--proxy-bypass-list=\"cdn.jsdelivr.net;*.docs.test\""));
         Assert.That(c, Does.Contain("file://").And.Contain("game.html").And.Not.Contain("--no-sandbox"));
 
-        await sut.RunAsync(A(new { path = "game.html" }), new ToolContext(_root, []), default);
-        Assert.That(commands[1], Does.Not.Contain("--proxy-bypass-list"), "no allowed hosts: nothing leaves the computer");
+        await sut.RunAsync(A(new { path = "game.html" }), new ToolContext(_root, [], true), default);
+        Assert.That(commands[1], Does.Contain("--proxy-server").And.Not.Contain("--proxy-bypass-list"), "no allowed hosts: nothing leaves the computer");
+
+        await sut.RunAsync(A(new { path = "game.html" }), new ToolContext(_root, ["cdn.jsdelivr.net"]), default);
+        Assert.That(commands[2], Does.Not.Contain("--proxy"), "the limit is off by default: the page may reach any host");
     }
 
     [Test]

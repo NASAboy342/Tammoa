@@ -6,7 +6,7 @@ using Tammoa.Models;
 namespace Tammoa.Services.Tools;
 
 /// <summary>Opens an HTML page of the allowed folder in a headless browser for a few seconds and reports what the model cannot see otherwise: errors on the console and whether a canvas was drawn.
-/// The page can only reach the card's allowed hosts (anything else goes to a dead proxy). It cannot judge whether a game plays right.</summary>
+/// With the card's "Limit web pages to allowed hosts" on, the page can only reach those hosts (anything else goes to a dead proxy); off by default. It cannot judge whether a game plays right.</summary>
 public partial class CheckPageTool : ITool
 {
     public const int RunSeconds = 10; // headless Chrome does not exit by itself after --dump-dom, so it is stopped after this
@@ -18,7 +18,7 @@ public partial class CheckPageTool : ITool
     public CheckPageTool(IProcessRunner runner, Func<string?> findBrowser) { _runner = runner; _findBrowser = findBrowser; }
 
     public ToolDefinition Definition { get; } = new(ToolIds.CheckPage,
-        "Opens an HTML file of the allowed folder in a headless browser for a few seconds and returns the errors it printed (console errors, uncaught exceptions, scripts that did not load) and whether a canvas was drawn. Call it right after write_file on any web page or game, fix every error it lists, write the file again, and call it again. It cannot tell whether the game plays correctly. Scripts from other web sites load only if their host is allowed.",
+        "Opens an HTML file of the allowed folder in a headless browser for a few seconds and returns the errors it printed (console errors, uncaught exceptions, scripts that did not load) and whether a canvas was drawn. Call it right after write_file on any web page or game, fix every error it lists, write the file again, and call it again. It cannot tell whether the game plays correctly. Scripts from other web sites load if the card lets pages reach the network.",
         ToolArgs.Schema(new JObject { ["path"] = ToolArgs.Prop("The .html file, relative to the allowed folder.") }, "path"));
 
     public bool NeedsRoot => true;
@@ -45,14 +45,18 @@ public partial class CheckPageTool : ITool
             var flags = new List<string>
             {
                 "--headless=new", "--disable-gpu", $"--user-data-dir={Quote(profile)}", "--enable-logging=stderr", "--v=0",
-                "--virtual-time-budget=4000", "--proxy-server=http://127.0.0.1:9", // everything off the computer goes to a dead proxy ...
+                "--virtual-time-budget=4000",
             };
-            if (context.AllowedHosts.Count > 0) flags.Add($"--proxy-bypass-list={Quote(string.Join(";", context.AllowedHosts.Select(h => h.Trim())))}"); // ... except the allowed hosts
+            if (context.LimitPageNetwork)
+            {
+                flags.Add("--proxy-server=http://127.0.0.1:9"); // everything off the computer goes to a dead proxy ...
+                if (context.AllowedHosts.Count > 0) flags.Add($"--proxy-bypass-list={Quote(string.Join(";", context.AllowedHosts.Select(h => h.Trim())))}"); // ... except the allowed hosts
+            }
             flags.Add("--dump-dom");
             flags.Add(Quote(new Uri(path).AbsoluteUri));
             var r = await _runner.RunAsync($"{Quote(browser)} {string.Join(" ", flags)}", root, null, TimeSpan.FromSeconds(RunSeconds), ct);
             var html = await File.ReadAllTextAsync(path, ct);
-            return Summarize(r.Stderr, r.Stdout, html, context.AllowedHosts);
+            return Summarize(r.Stderr, r.Stdout, html, context.LimitPageNetwork ? context.AllowedHosts : null);
         }
         finally
         {
@@ -61,7 +65,8 @@ public partial class CheckPageTool : ITool
     }
 
     /// <summary>Turns the browser's log and the page it dumped into a short report for the model.</summary>
-    public static string Summarize(string browserLog, string dumpedDom, string sourceHtml, IReadOnlyList<string> allowedHosts)
+    /// <param name="allowedHosts">Null = the page may reach any host (nothing is reported as blocked).</param>
+    public static string Summarize(string browserLog, string dumpedDom, string sourceHtml, IReadOnlyList<string>? allowedHosts)
     {
         var errors = new List<string>();
         var logs = new List<string>();
@@ -78,7 +83,7 @@ public partial class CheckPageTool : ITool
         }
         errors = errors.Distinct().ToList();
 
-        var blocked = ExternalHosts(sourceHtml).Where(h => !allowedHosts.Any(a => HttpRequestTool.HostMatches(a, h))).Distinct().ToList();
+        var blocked = allowedHosts is null ? [] : ExternalHosts(sourceHtml).Where(h => !allowedHosts.Any(a => HttpRequestTool.HostMatches(a, h))).Distinct().ToList();
         var canvas = dumpedDom.Contains("<canvas", StringComparison.OrdinalIgnoreCase);
         var parts = new List<string>();
         parts.Add(errors.Count == 0 ? "No errors on the console." : $"{errors.Count} error(s):\n" + string.Join("\n", errors.Take(MaxLines).Select(e => "- " + e)) + (errors.Count > MaxLines ? $"\n- … and {errors.Count - MaxLines} more" : ""));

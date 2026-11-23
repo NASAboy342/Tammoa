@@ -6,8 +6,8 @@ namespace Tammoa.Services.Tools;
 /// <summary>A tool call refused by a rule (outside the root folder, host not allowed, not approved). The reason goes back to the model, it does not fail the card.</summary>
 public class ToolRejectedException(string reason) : Exception(reason);
 
-/// <summary>What the card allows its tools to touch.</summary>
-public record ToolContext(string? Root, IReadOnlyList<string> AllowedHosts);
+/// <summary>What the card allows its tools to touch. `LimitPageNetwork`: a page opened by check_page may reach only the allowed hosts (off by default: it may reach any host).</summary>
+public record ToolContext(string? Root, IReadOnlyList<string> AllowedHosts, bool LimitPageNetwork = false);
 
 /// <summary>One action the model may ask for. Description and parameters are sent to the model as a function schema.</summary>
 public interface ITool

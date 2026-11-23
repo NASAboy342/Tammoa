@@ -20,8 +20,8 @@ test.describe('AI tools: settings', () => {
       await open(page, flow.id)
       await node(page, 'ai').click()
 
-      // nothing ticked: the four tools are offered, no tool setting is shown
-      for (const t of ['read_file', 'write_file', 'http_request', 'run_script']) await expect(option(page, t)).toHaveAttribute('aria-checked', 'false')
+      // nothing ticked: the five tools are offered, no tool setting is shown
+      for (const t of ['read_file', 'write_file', 'http_request', 'run_script', 'check_page']) await expect(option(page, t)).toHaveAttribute('aria-checked', 'false')
       for (const k of ['toolRoot', 'allowedHosts', 'maxSteps', 'approverModel']) await expect(page.getByTestId(`param-${k}`)).toHaveCount(0)
 
       await option(page, 'read_file').click()

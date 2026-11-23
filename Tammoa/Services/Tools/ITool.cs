@@ -26,6 +26,9 @@ public interface ITool
     /// <exception cref="ArgumentException">Missing or wrong arguments.</exception>
     /// <exception cref="InvalidOperationException">The work failed.</exception>
     Task<string> RunAsync(JObject arguments, ToolContext context, CancellationToken ct);
+
+    /// <summary>True when doing exactly this call again, right after it ran, changes nothing (an overwrite with the same text). The loop then skips it and tells the model so.</summary>
+    bool IsNoOpWhenRepeated(JObject arguments) => false;
 }
 
 public interface IToolRegistry

@@ -66,6 +66,7 @@ internal static class Program
         services.AddSingleton<ITool, WriteFileTool>();
         services.AddSingleton<ITool, HttpRequestTool>();
         services.AddSingleton<ITool, RunScriptTool>();
+        services.AddSingleton<ITool, CheckPageTool>();
         services.AddSingleton<IToolRegistry, ToolRegistry>();
         services.AddSingleton<IToolLoop, ToolLoop>();
         services.AddSingleton<IConnectionRepository>(_ => new ConnectionRepository(DataPaths.DatabaseFile()));

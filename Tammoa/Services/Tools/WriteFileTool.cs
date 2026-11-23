@@ -18,6 +18,8 @@ public class WriteFileTool : ITool
 
     public bool NeedsRoot => true;
 
+    public bool IsNoOpWhenRepeated(JObject arguments) => ToolArgs.Optional(arguments, "mode", "overwrite") == "overwrite";
+
     public void Check(JObject arguments, ToolContext context)
     {
         RootGuard.Resolve(ToolArgs.RequireRoot(context), ToolArgs.Required(arguments, "path"));

@@ -347,6 +347,39 @@ public class ToolLoopTest
     }
 
     // ---- live view: what we are waiting for, and the stages of every call
+    [Test]
+    public async Task AnIdenticalOverwrite_RightAfterTheSameOne_IsNotDoneAgain_NoApproverIsAsked_AndTheModelIsToldToFinish()
+    {
+        ApproverSays("""{"reason": "ok", "approve": true}""");
+        _turns.Enqueue(Call((ToolIds.WriteFile, new { path = "a.txt", content = "same" })));
+        _turns.Enqueue(Call((ToolIds.WriteFile, new { path = "a.txt", content = "same" })));
+        _turns.Enqueue(Say("done"));
+        var o = await _sut.RunAsync(Req(approver: "judge"), null, default);
+
+        var calls = (JArray)o["toolCalls"]!;
+        Assert.That(calls.Select(c => (string)c["decision"]!), Is.EqualTo(new[] { "ran", "ran" }));
+        Assert.That((bool?)calls[0]["repeat"], Is.Null);
+        Assert.That((bool)calls[1]["repeat"]!, Is.True);
+        Assert.That((string)calls[1]["result"]!, Does.Contain("Not written again").And.Contain("final answer"));
+        await _ollama.Received(1).ChatAsync(Arg.Any<Connection>(), Arg.Any<OllamaChatRequest>(), Arg.Any<TimeSpan>(), Arg.Any<CancellationToken>()); // the approver saw only the first
+        Assert.That((string)_messagesSeen[2].Last()["content"]!, Does.Contain("Not written again"));
+    }
+
+    [Test]
+    public async Task ADifferentContent_AnAppend_OrAnInterveningCall_IsStillDone()
+    {
+        _turns.Enqueue(Call((ToolIds.WriteFile, new { path = "a.txt", content = "1" })));
+        _turns.Enqueue(Call((ToolIds.WriteFile, new { path = "a.txt", content = "2" })));                      // other content
+        _turns.Enqueue(Call((ToolIds.WriteFile, new { path = "a.txt", content = "+", mode = "append" })));      // append twice is not a repeat
+        _turns.Enqueue(Call((ToolIds.WriteFile, new { path = "a.txt", content = "+", mode = "append" })));
+        _turns.Enqueue(Call((ToolIds.WriteFile, new { path = "b.txt", content = "x" }), (ToolIds.ReadFile, new { path = "b.txt" }), (ToolIds.WriteFile, new { path = "b.txt", content = "x" }))); // a read between
+        _turns.Enqueue(Say("done"));
+        var o = await _sut.RunAsync(Req(maxSteps: 9), null, default);
+
+        Assert.That(((JArray)o["toolCalls"]!).Any(c => c["repeat"] is not null), Is.False);
+        Assert.That(File.ReadAllText(Path.Combine(_root, "a.txt")), Is.EqualTo("2++"));
+    }
+
     private static string Stage(JToken live, int call) => (string)live["toolCalls"]![call]!["decision"]!;
     private List<string> StagesOf(int call) => _progress.Where(p => ((JArray)p["toolCalls"]!).Count > call).Select(p => Stage(p, call)).Aggregate(new List<string>(), (l, x) => { if (l.Count == 0 || l[^1] != x) l.Add(x); return l; });
 

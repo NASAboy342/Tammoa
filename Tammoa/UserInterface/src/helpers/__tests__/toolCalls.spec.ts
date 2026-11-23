@@ -70,6 +70,8 @@ describe('paramVisible', () => {
     expect(paramVisible('toolRoot', { tools: ['http_request'] })).toBe(false)
     expect(paramVisible('allowedHosts', { tools: ['http_request'] })).toBe(true)
     expect(paramVisible('allowedHosts', { tools: ['write_file'] })).toBe(false)
+    expect(paramVisible('toolRoot', { tools: ['check_page'] })).toBe(true)
+    expect(paramVisible('allowedHosts', { tools: ['check_page'] })).toBe(true) // a page may load scripts from allowed hosts
     expect(paramVisible('maxSteps', { tools: ['http_request'] })).toBe(true)
     expect(paramVisible('approverModel', { tools: ['run_script'] })).toBe(true)
     expect(paramVisible('toolRoot', { tools: 'read_file' })).toBe(false) // not an array: nothing selected

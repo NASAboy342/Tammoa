@@ -9,6 +9,7 @@ public static class ToolIds
     public const string WriteFile = "write_file";
     public const string HttpRequest = "http_request";
     public const string RunScript = "run_script";
+    public const string CheckPage = "check_page";
 
     public static readonly IReadOnlyList<ParamOption> Options =
     [
@@ -16,5 +17,6 @@ public static class ToolIds
         new(WriteFile, "Write file (inside the root folder)"),
         new(HttpRequest, "HTTP request (allowed hosts only)"),
         new(RunScript, "Run script (inside the root folder, best-effort guard)"),
+        new(CheckPage, "Check web page (opens an .html file headless, lists its errors)"),
     ];
 }

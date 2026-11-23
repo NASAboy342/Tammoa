@@ -304,7 +304,7 @@ test('AI tool settings (ticked tools, warning) and the tool call list (live and 
     const flow = await (await request.post('/api/flows', { data: { name: `Tools ${Date.now()}`, description: '' } })).json()
     const nodes = [
       { id: 't', type: 'trigger.manual', name: 'Start', position: { x: 0, y: 0 }, params: {} },
-      { id: 'a', type: 'ai.ollama', name: 'Ask', position: { x: 280, y: 0 }, params: { connection: conn.id, model: 'tiny:1b', prompt: 'go', think: 'off', tools: ['read_file', 'write_file', 'http_request', 'run_script'], toolRoot: root, allowedHosts: 'a.test' } },
+      { id: 'a', type: 'ai.ollama', name: 'Ask', position: { x: 280, y: 0 }, params: { connection: conn.id, model: 'tiny:1b', prompt: 'go', think: 'off', tools: ['read_file', 'write_file', 'http_request', 'run_script', 'check_page'], toolRoot: root, allowedHosts: 'a.test' } },
     ]
     await request.put(`/api/flows/${flow.id}`, { data: { name: flow.name, description: '', definition: { nodes, edges: [{ id: 'e', source: 't', target: 'a' }] } } })
     await page.goto(`/#/flows/${flow.id}`)

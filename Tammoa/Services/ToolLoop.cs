@@ -123,7 +123,7 @@ public class ToolLoop : IToolLoop
             Report(lastText);
             foreach (var record in batch)
             {
-                await RunToolAsync(r, selected, record, (decision, kind) =>
+                await RunToolAsync(r, selected, records, record, (decision, kind) =>
                 {
                     record["decision"] = decision;
                     SetPhase(kind, step, (string)record["name"]!);
@@ -137,7 +137,7 @@ public class ToolLoop : IToolLoop
     }
 
     /// <summary>Runs one queued call and turns its record into the final one (ran / rejected / failed). `enter(decision, phaseKind)` announces the stage it is in.</summary>
-    private async Task RunToolAsync(ToolLoopRequest r, Dictionary<string, ITool> selected, JObject record, Action<string, string> enter, CancellationToken ct)
+    private async Task RunToolAsync(ToolLoopRequest r, Dictionary<string, ITool> selected, JArray records, JObject record, Action<string, string> enter, CancellationToken ct)
     {
         var name = (string)record["name"]!;
         var arguments = (JObject)record["arguments"]!;
@@ -147,6 +147,14 @@ public class ToolLoop : IToolLoop
             if (!selected.TryGetValue(name, out var tool))
                 throw new ArgumentException($"There is no tool '{name}'. Available tools: {string.Join(", ", selected.Keys)}.");
             tool.Check(arguments, r.Context); // the rules first: a call that breaks them never reaches the approver
+            if (tool.IsNoOpWhenRepeated(arguments) && IsSameAsPrevious(records, record))
+            {   // a small model often writes the same file again and again: nothing is done (and no approver is asked), it is told to finish
+                record["result"] = "Not written again: this is exactly the same call as your previous one and that file is already saved. Do not repeat it. If the work is finished, give your final answer now; if something is still wrong, change the content first.";
+                record["decision"] = "ran";
+                record["repeat"] = true;
+                record["durationMs"] = 0;
+                return;
+            }
             if (r.ApproverModel is { Length: > 0 } approver)
             {
                 enter("approving", "approver");
@@ -168,6 +176,14 @@ public class ToolLoop : IToolLoop
             record["reason"] = ex.Message;
         }
         record["durationMs"] = Math.Round(clock.Elapsed.TotalMilliseconds, 1);
+    }
+
+    /// <summary>The call right before this one (the record just before it in the list) ran and had the same tool and the same arguments.</summary>
+    private static bool IsSameAsPrevious(JArray records, JObject record)
+    {
+        var i = records.IndexOf(record);
+        return i > 0 && records[i - 1] is JObject prev && (string?)prev["decision"] == "ran"
+            && (string?)prev["name"] == (string?)record["name"] && JToken.DeepEquals(prev["arguments"], record["arguments"]);
     }
 
     /// <summary>Asks the small model. Returns null when approved, else the reason. Anything unclear counts as "no".</summary>

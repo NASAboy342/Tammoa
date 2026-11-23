@@ -20,6 +20,7 @@ export const TOOL_ICON: Record<string, IconName> = {
   write_file: 'file-plus',
   http_request: 'globe',
   run_script: 'terminal',
+  check_page: 'flask',
 }
 export const toolIcon = (name: string): IconName => TOOL_ICON[name] ?? 'zap'
 
@@ -113,14 +114,15 @@ export const callDetail = (c: ToolCall): string => (c.decision === 'ran' ? (c.re
 
 // ---- which settings of the AI card matter for the tools ticked
 // TODO(backend-enhance): move this into the param descriptors (e.g. `showWhen`) so the UI stays free of card-specific code.
-const FILE_TOOLS = ['read_file', 'write_file', 'run_script']
+const FILE_TOOLS = ['read_file', 'write_file', 'run_script', 'check_page']
+const HOST_TOOLS = ['http_request', 'check_page'] // check_page lets a page reach the allowed hosts only (a CDN script, for instance)
 const selected = (values: Record<string, unknown>) => (Array.isArray(values.tools) ? (values.tools as unknown[]).filter((t): t is string => typeof t === 'string') : [])
 
 /** Whether a param is worth showing for the current values. Everything not tool-related is always shown. */
 export function paramVisible(key: string, values: Record<string, unknown>): boolean {
   const tools = selected(values)
   if (key === 'toolRoot') return tools.some((t) => FILE_TOOLS.includes(t))
-  if (key === 'allowedHosts') return tools.includes('http_request')
+  if (key === 'allowedHosts') return tools.some((t) => HOST_TOOLS.includes(t))
   if (key === 'maxSteps' || key === 'approverModel') return tools.length > 0
   if (key === 'approverPrompt') return tools.length > 0 && typeof values.approverModel === 'string' && values.approverModel.trim() !== '' // only when an approver is chosen
   return true

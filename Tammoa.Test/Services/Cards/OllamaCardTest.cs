@@ -242,11 +242,11 @@ public class OllamaCardTest
     }
 
     [Test]
-    public void ToolsParam_IsAMultiSelect_WithTheFourToolsAndNothingSelectedByDefault()
+    public void ToolsParam_IsAMultiSelect_WithTheFiveToolsAndNothingSelectedByDefault()
     {
         var p = _sut.Info.Params.Single(x => x.Key == "tools");
         Assert.That(p.Kind, Is.EqualTo(ParamKind.MultiSelect));
-        Assert.That(p.Options!.Select(o => o.Value), Is.EqualTo(new[] { "read_file", "write_file", "http_request", "run_script" }));
+        Assert.That(p.Options!.Select(o => o.Value), Is.EqualTo(new[] { "read_file", "write_file", "http_request", "run_script", "check_page" }));
         Assert.That(p.DefaultValue, Is.Null);
         Assert.That(_sut.Info.Params.Single(x => x.Key == "approverModel").OptionsDependsOn, Is.EqualTo("connection"));
     }

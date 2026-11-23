@@ -23,6 +23,7 @@
 
   <ItemGroup>
     <EmbeddedResource Include="Resources\**" />
+    <EmbeddedResource Include="AgentSkill\tammoa-flows\SKILL.md" LogicalName="AgentSkill.SKILL.md" />
     <None Update="wwwroot\**">
       <CopyToOutputDirectory>Always</CopyToOutputDirectory>
     </None>

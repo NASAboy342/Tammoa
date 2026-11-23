@@ -21,6 +21,7 @@ internal static class Program
 
         // This already built the host, so its DI container is sealed: app services get their own container.
         var app = PhotinoServer.CreateStaticFileServer(args, out string baseUrl);
+        var apiUrl = baseUrl; // release: the UI and the API are served by the same server
 #if DEBUG
         // Dev only: the Vite proxy needs a known API address. 8000 (or TAMMOA_PORT) if free, else up to 5 random ports, else give up.
         // The UI of a packaged app is served by the static server itself (baseUrl, a free port of its own), so release binds nothing extra.
@@ -33,6 +34,7 @@ internal static class Program
             return;
         }
         app.Urls.Add($"http://localhost:{apiPort}");
+        apiUrl = $"http://localhost:{apiPort}"; // the UI is on the Vite server in dev: the API has its own address
         PortFinder.WritePortFile(PortFinder.PortFile(), apiPort);
         Console.WriteLine($"API: http://localhost:{apiPort}");
 #endif
@@ -74,18 +76,22 @@ internal static class Program
         services.AddSingleton<ICardOptionsService, CardOptionsService>();
         services.AddSingleton<ICardRegistry, CardRegistry>();
         services.AddSingleton<IFlowDefinitionValidator, FlowDefinitionValidator>();
+        services.AddSingleton<IAgentAccessRepository>(_ => new AgentAccessRepository(Path.Combine(DataPaths.DataDir(), "agent-access.json")));
+        services.AddSingleton<IAgentAccessService>(sp => new AgentAccessService(sp.GetRequiredService<IAgentAccessRepository>(), sp.GetRequiredService<ICardRegistry>(), apiUrl));
         services.AddSingleton<IFlowExecutor, FlowExecutor>();
         services.AddSingleton<IRunRepository, RunRepository>();
         services.AddSingleton<IRunEventBus, RunEventBus>();
         services.AddSingleton<IRunService, RunService>();
         using var provider = services.BuildServiceProvider();
 
+        app.UseAgentAccess(provider.GetRequiredService<IAgentAccessService>()); // before the endpoints: it scopes requests that carry an agent token
         app.MapAppEndpoints(provider.GetRequiredService<IAppInfoService>());
         app.MapFlowEndpoints(provider.GetRequiredService<IFlowService>());
         app.MapCardEndpoints(provider.GetRequiredService<ICardRegistry>(), provider.GetRequiredService<ICardOptionsService>());
         app.MapConnectionEndpoints(provider.GetRequiredService<IConnectionService>());
         app.MapDataEndpoints(provider.GetRequiredService<IDataService>());
         app.MapRunEndpoints(provider.GetRequiredService<IRunService>(), provider.GetRequiredService<IRunEventBus>());
+        app.MapAgentEndpoints(provider.GetRequiredService<IAgentAccessService>());
 
 #if DEBUG
         var appUrl = "http://localhost:5173"; // Vite dev server (hot reload)

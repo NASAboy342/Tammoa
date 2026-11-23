@@ -40,6 +40,13 @@ Select an Ollama card and press Run: its **Thinking** (if the model thinks) and 
 ## Connections (AI models)
 Open **Connections**, add your Ollama address (default `http://localhost:11434`; an API key is optional and only needed behind a proxy), press **Test** to see its models, then pick the connection and a model in an Ollama card. The key is stored in plain text on this computer in a folder only you can open (`~/Library/Application Support/Tammoa`), never shown again and never put in exported flows.
 
+## Let an AI assistant build flows (Agent access)
+Open **Agent** in the top bar. Switch **Agent access** on, press **Copy for the agent** and paste the text to your assistant (Claude Code, for example). It contains the address of this app, a secret token and where to read the *skill*, a guide the app serves about how to build flows for this exact version, with the live list of cards. The assistant then creates and edits flows through the local API and they appear in your list. You can also **Copy the skill** and save it as `.claude/skills/tammoa-flows/SKILL.md` in another project, so an assistant knows Tammoa before you give it the address.
+- It **cannot run flows** unless you switch on *Let the agent run flows* (running starts scripts, web requests and AI models on your computer). It cannot delete flows, change connections or see their keys, and it cannot change these switches.
+- *Make a new token* cuts off an assistant that has the old one. The address changes when Tammoa starts on another port: copy again.
+- Tammoa's local API stays reachable by programs on your computer, as it always was; the token scopes an assistant, it is not a lock on the app.
+- **For developers:** when you add or change an API route, update `Services/AgentApi.cs` (a test fails if a route is missing) and, if it changes how flows are built, `Tammoa/AgentSkill/tammoa-flows/SKILL.md`.
+
 ## Building and running a flow
 1. Open a flow. **Add card** lists the card types: *Manual trigger*, *Script*, *Set value*.
 2. Drag cards where you like, drag from a card's right dot onto another card to connect them, click a card to edit its settings on the right. **Save**.

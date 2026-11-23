@@ -12,6 +12,11 @@ public static class FlowEndpoints
     {
         app.MapGet("/api/flows", () => EndpointHelpers.TrySync(() => JsonHelper.Ok(service.List())));
 
+        app.MapPost("/api/flows/validate", (HttpRequest req) => EndpointHelpers.Try(async () =>
+        {
+            var body = await JsonHelper.ReadBodyAsync<ValidateFlowRequest>(req) ?? throw new ArgumentException("A request body is required.");
+            return JsonHelper.Ok(service.Validate(body.Definition));
+        }));
         app.MapGet("/api/flows/{id}/export", (string id) => EndpointHelpers.TrySync(() => JsonHelper.Ok(service.Export(id))));
 
         app.MapPost("/api/flows/import", (HttpRequest req) => EndpointHelpers.Try(async () =>

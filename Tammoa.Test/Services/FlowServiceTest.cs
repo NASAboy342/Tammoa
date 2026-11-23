@@ -36,6 +36,24 @@ public class FlowServiceTest
     private static Flow Existing(string name = "Daily report", bool enabled = false, JObject? def = null) =>
         new("abc", name, "desc", enabled, def ?? JObject.Parse("{\"nodes\":[{\"id\":\"n1\"},{\"id\":\"n2\"}],\"edges\":[]}"), T0, T0);
 
+    // --- validate (dry check for an agent: nothing saved, the reason comes back instead of an exception)
+    [Test]
+    public void Validate_AValidDefinition_IsValid_AndNothingIsSaved()
+    {
+        var result = _sut.Validate(JObject.Parse("{\"nodes\":[],\"edges\":[]}"));
+        Assert.That(result, Is.EqualTo(new FlowValidation(true, null)));
+        _repo.DidNotReceiveWithAnyArgs().Insert(default!);
+        _repo.DidNotReceiveWithAnyArgs().Update(default!);
+    }
+
+    [Test]
+    public void Validate_AProblem_ComesBackAsTheReason_NotAnException()
+    {
+        _validator.When(v => v.Validate(Arg.Any<JObject>())).Do(_ => throw new ArgumentException("Unknown card type 'x'."));
+        Assert.That(_sut.Validate(new JObject()), Is.EqualTo(new FlowValidation(false, "Unknown card type 'x'.")));
+        Assert.That(_sut.Validate(null), Is.EqualTo(new FlowValidation(false, "A definition is required: { \"nodes\": [], \"edges\": [] }.")));
+    }
+
     // --- create
     [Test]
     public void Create_ValidRequest_InsertsDisabledFlowWithEmptyDefinition()

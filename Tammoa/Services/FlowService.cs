@@ -154,6 +154,19 @@ public class FlowService : IFlowService
         return trimmed;
     }
 
+    public FlowValidation Validate(JObject? definition)
+    {
+        try
+        {
+            ValidDefinition(definition ?? throw new ArgumentException("A definition is required: { \"nodes\": [], \"edges\": [] }."));
+            return new FlowValidation(true, null);
+        }
+        catch (ArgumentException ex)
+        {
+            return new FlowValidation(false, ex.Message);
+        }
+    }
+
     private JObject ValidDefinition(JObject definition)
     {
         if (definition.ToString(Newtonsoft.Json.Formatting.None).Length > MaxDefinitionLength)

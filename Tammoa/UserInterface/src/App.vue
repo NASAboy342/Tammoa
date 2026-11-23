@@ -10,6 +10,7 @@ import { useThemeStore } from '@/stores/themeStore'
 const nav: { name: string; label: string; icon: IconName }[] = [
   { name: 'flows', label: 'Flows', icon: 'git-branch' },
   { name: 'connections', label: 'Connections', icon: 'plug' },
+  { name: 'agent', label: 'Agent', icon: 'bot' },
 ]
 const theme = useThemeStore()
 const app = useAppStore()

@@ -289,6 +289,20 @@ test('connections page and its dialogs: every clickable has an icon, every field
   await request.delete(`/api/connections/${c.id}`)
 })
 
+test('agent access page: every clickable has an icon (token shown, skill open, new-token dialog)', async ({ page }) => {
+  await page.goto('/#/agent')
+  await page.getByTestId('agent-token').waitFor()
+  expect(await withoutIcon(page), 'agent access page').toEqual([])
+  await page.getByTestId('agent-toggle-token').click()
+  await page.getByTestId('agent-view-skill').click()
+  await expect(page.getByTestId('output-viewer')).toBeVisible()
+  expect(await withoutIcon(page), 'agent access page with the skill shown').toEqual([])
+  await page.getByTestId('agent-new-token').click()
+  await expect(page.getByTestId('confirm-dialog')).toBeVisible()
+  expect(await withoutIcon(page), 'new token dialog').toEqual([])
+  await page.getByTestId('confirm-cancel').click()
+})
+
 test('the audit really looks at the controls (not an empty selection)', async ({ page }) => {
   await page.goto(ROUTES[0])
   await page.getByTestId('flows').waitFor()

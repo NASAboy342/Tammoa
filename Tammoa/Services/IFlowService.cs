@@ -1,3 +1,4 @@
+using Newtonsoft.Json.Linq;
 using Tammoa.Models;
 
 namespace Tammoa.Services;
@@ -28,6 +29,9 @@ public interface IFlowService
     /// TODO(run engine): enabling does not activate triggers yet; decide what "active" means once flows can run.</summary>
     /// <exception cref="KeyNotFoundException">No flow with that id (404).</exception>
     Flow SetEnabled(string id, bool enabled);
+
+    /// <summary>Dry check of a definition (nothing is saved). Never throws for a bad definition: the reason comes back in the result.</summary>
+    FlowValidation Validate(JObject? definition);
 
     /// <summary>Copies a flow as "NAME (copy)", disabled.</summary>
     /// <exception cref="KeyNotFoundException">No flow with that id (404).</exception>

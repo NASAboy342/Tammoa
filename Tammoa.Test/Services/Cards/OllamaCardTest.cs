@@ -49,6 +49,33 @@ public class OllamaCardTest
         Assert.That(r["json"], Is.Null);
     }
 
+    [Test]
+    public async Task NumCtx_IsPassedOn_AndEmptyMeansTheServerDefault()
+    {
+        await _sut.ExecuteAsync(Ctx(new { connection = "c1", model = "m", prompt = "p", numCtx = "16384" }), default);
+        await _client.Received(1).ChatAsync(Arg.Any<Connection>(), Arg.Is<OllamaChatRequest>(q => q.NumCtx == 16384), Arg.Any<TimeSpan>(), Arg.Any<CancellationToken>(), Arg.Any<Action<string, string>?>());
+        _client.ClearReceivedCalls();
+        await _sut.ExecuteAsync(Ctx(new { connection = "c1", model = "m", prompt = "p", numCtx = "" }), default);
+        await _client.Received(1).ChatAsync(Arg.Any<Connection>(), Arg.Is<OllamaChatRequest>(q => q.NumCtx == null), Arg.Any<TimeSpan>(), Arg.Any<CancellationToken>(), Arg.Any<Action<string, string>?>());
+    }
+
+    [TestCase(100)]
+    [TestCase(2000000)]
+    [TestCase(4096.5)]
+    public void NumCtx_OutOfRangeOrFractional_IsRefusedWithAReason(double value)
+    {
+        var ex = Assert.ThrowsAsync<ArgumentException>(() => _sut.ExecuteAsync(Ctx(new { connection = "c1", model = "m", prompt = "p", numCtx = value }), default));
+        Assert.That(ex!.Message, Does.Contain("Context size"));
+    }
+
+    [Test]
+    public async Task NumCtx_ReachesTheToolLoop_Too()
+    {
+        var root = Path.GetTempPath();
+        await _sut.ExecuteAsync(Ctx(new { connection = "c1", model = "m", prompt = "p", tools = new[] { "read_file" }, toolRoot = root, numCtx = 32768 }), default);
+        await _loop.Received(1).RunAsync(Arg.Is<ToolLoopRequest>(q => q.NumCtx == 32768), Arg.Any<Action<JToken>?>(), Arg.Any<CancellationToken>());
+    }
+
     [TestCase("on", true)]
     [TestCase("off", false)]
     [TestCase("auto", null)]

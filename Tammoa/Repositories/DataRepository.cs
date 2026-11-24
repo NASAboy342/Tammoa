@@ -40,6 +40,17 @@ public class DataRepository : IDataRepository
         }
     }
 
+    public IReadOnlyList<(string Name, string Text)> ListShared()
+    {
+        var dir = Path.Combine(_root, "shared");
+        lock (_lock)
+        {
+            if (!Directory.Exists(dir)) return [];
+            return Directory.GetFiles(dir, "*.txt").OrderBy(f => f, StringComparer.Ordinal)
+                .Select(f => (Path.GetFileNameWithoutExtension(f), File.ReadAllText(f))).ToList();
+        }
+    }
+
     public void DeleteFlow(string flowId)
     {
         var dir = Path.Combine(_root, "flows", Safe(flowId));

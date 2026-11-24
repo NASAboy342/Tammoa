@@ -25,6 +25,10 @@ public interface IConnectionService
     /// <exception cref="KeyNotFoundException">404.</exception>
     Task<ConnectionTestResult> TestAsync(string id, CancellationToken ct);
 
+    /// <summary>Puts a connection of a backup back with its ORIGINAL id (so the cards that use it work again), without a key. Returns false, changing nothing, when one with that id exists.</summary>
+    /// <exception cref="ArgumentException">Bad id, name, provider or URL (400).</exception>
+    bool Restore(BackupConnection backup);
+
     /// <summary>Internal: the connection WITH its key, for cards. Never expose the result to the UI.</summary>
     /// <exception cref="KeyNotFoundException">No such connection.</exception>
     Connection GetForUse(string id);

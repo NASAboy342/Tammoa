@@ -53,6 +53,16 @@ public static class AgentApi
         new("GET", "/api/agent/access", "The token and the switches belong to the user."),
         new("PUT", "/api/agent/access", "The agent must not change its own permissions."),
         new("POST", "/api/agent/access/token", "The agent must not change its own token."),
+        new("GET", "/api/settings", "App settings belong to the user."),
+        new("PUT", "/api/settings", "App settings belong to the user."),
+        new("GET", "/api/app/update", "Not needed to build flows (and it calls the internet)."),
+        new("GET", "/api/backup", "Backups belong to the user."),
+        new("POST", "/api/backup", "Backups belong to the user."),
+        new("POST", "/api/backup/restore", "Restoring changes the user's flows and connections: only the user does it."),
+        new("POST", "/api/backup/restore-file", "Same as restore."),
+        new("POST", "/api/backup/open-folder", "Opens a window on the user's computer."),
+        new("GET", "/api/templates", "A convenience of the UI; an agent builds its own definition."),
+        new("POST", "/api/templates/{id}/create", "A convenience of the UI; an agent creates flows with POST /api/flows."),
     ];
 
     /// <summary>Route shape without the parameter names, so `{id}` and `{flowId}` compare equal.</summary>

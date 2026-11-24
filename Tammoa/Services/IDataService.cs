@@ -39,6 +39,12 @@ public interface IDataService
     /// <summary>cardId -> text of the flow's own (flow-scoped) Data cards, for export.</summary>
     JObject ExportFlowData(string flowId, JObject definition);
 
+    /// <summary>name -> text of every shared Data text (for a backup).</summary>
+    JObject ExportShared();
+
+    /// <summary>Writes shared texts that do not exist yet (never overwrites); returns how many were added. Oversized or non-text values are ignored.</summary>
+    int ImportShared(JObject? texts);
+
     /// <summary>Writes exported texts for the Data cards of the (new) flow; unknown cards and oversized texts are ignored.</summary>
     void ImportFlowData(string flowId, JObject definition, JObject? data);
 }

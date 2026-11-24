@@ -20,11 +20,13 @@ export function connectRunEvents(
   onOpen: () => void,
   onRemoved: (removed: RunRemoved) => void = () => {},
   onDataChanged: (changed: DataChanged) => void = () => {},
+  onLost: () => void = () => {},
 ): () => void {
   const source = new EventSource('/api/events')
   source.addEventListener('run', (e) => onRun(JSON.parse((e as MessageEvent<string>).data) as FlowRun))
   source.addEventListener('run-removed', (e) => onRemoved(JSON.parse((e as MessageEvent<string>).data) as RunRemoved))
   source.addEventListener('data-changed', (e) => onDataChanged(JSON.parse((e as MessageEvent<string>).data) as DataChanged))
   source.onopen = () => onOpen()
+  source.onerror = () => onLost() // the browser keeps trying; `onOpen` fires again when the backend is back
   return () => source.close()
 }

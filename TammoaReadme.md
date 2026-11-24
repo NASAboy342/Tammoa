@@ -5,7 +5,13 @@ A desktop app for building AI-agent automations from modular **cards** (inspired
 ## Using it now
 - **Flows** (home): create with *New flow*, open a flow to rename it or change its description, switch it *Enabled/Disabled* (a flag for now; nothing runs yet), duplicate, or delete. Deleting asks you to type the flow's exact name.
 - Flows are stored in a local SQLite file in your user data folder (`~/Library/Application Support/Tammoa` on macOS, `%APPDATA%\Tammoa` on Windows). Set `TAMMOA_DATA_DIR` to use another folder (handy for testing).
-- Flows can be exported/imported as a portable JSON document through the API (`GET /api/flows/{id}/export`, `POST /api/flows/import`); UI buttons come later.
+- Flows can be exported/imported as a portable JSON document through the API (`GET /api/flows/{id}/export`, `POST /api/flows/import`); UI buttons for a single flow come later. To move or protect everything at once, use **Backup** in Settings.
+
+## First time here
+- **No flows yet?** The Flows page greets you and offers **Start from a template**. Pick *Hello, flow* (no AI, nothing to set up), press **Run** in the flow, then click a card to see what it received and produced. **From a template** in the header is always there: *Choose a path (IF)*, *Call a web API*, and two AI ones (*Summarize text*, *Summarize a file*) that need an Ollama connection (the dialog lets you choose the connection and the model).
+- **Ollama:** install it (ollama.com), download a model (`ollama pull qwen3:14b`), then add the connection under **Connections** (usually `http://localhost:11434`) and press **Test**.
+- **Settings** (top bar): **Check for updates** asks GitHub for the latest release (nothing about you is sent; you can switch on *Check when the app opens*, it is off by default). **Back up now** writes one file (flows, their Data texts, connections **without keys**, shared texts) into the `backups` folder of your data folder; **Restore** puts back what is missing and never overwrites anything. API keys, run history and the agent token are not in a backup: type the keys again after a restore. Copy the file to another computer and use *Restore from a file…* to move everything.
+- Where the app looks for updates: `RepositoryUrl` in `Tammoa/Tammoa.csproj`.
 
 ## Cards
 | Card | Use it to |
@@ -17,7 +23,7 @@ A desktop app for building AI-agent automations from modular **cards** (inspired
 | Script | run **Shell, JavaScript (needs Node) or Python (needs python3)**; read the input from `$TAMMOA_INPUT` (JSON); print JSON to use it in the next card as `{{input.json.x}}` |
 | HTTP Request | call a web API |
 | Read file, Write file | read or write a text file. Read file passes on what it received as `{{input.input}}`. A missing file is read as empty text (`exists` is false); switch on *Create the file* to create it and its folders |
-| Ollama | ask a local or remote Ollama model (create a connection first) |
+| Ollama | ask a local or remote Ollama model (create a connection first). *Context size* (optional) sets how much the model can read at once: Ollama's default is small (about 2048-4096 tokens) and quietly forgets the start of a long prompt, so set it (for example 16384) for long tasks and tools |
 
 ## Reusable data: the Data card
 Need a piece of text that many cards use (a style guide, settings, a template) **without** triggering anything? Add a **Data** card.
@@ -111,7 +117,7 @@ Release packaging copies `UserInterface/dist` into `Tammoa/Resources/wwwroot` (e
 
 ## Deploy
 <!-- deploy reads this section. Filled in by setup-deploy. -->
-TBD — run `setup-deploy`.
+TBD — run `setup-deploy`. Ready for it: the app icon (`Tammoa/AppIcon/app.ico`, `app.icns`), the update source (`RepositoryUrl` in `Tammoa/Tammoa.csproj`: the update check reads the latest **GitHub release** of that repository, so the version of a release tag, for example `v0.2.0`, must be higher than `<Version>`).
 
 ## Versioning
 Single source of truth: `<Version>` in `Tammoa/Tammoa.csproj` — frontend `package.json` version is not used.

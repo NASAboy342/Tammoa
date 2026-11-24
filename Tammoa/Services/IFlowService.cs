@@ -44,4 +44,8 @@ public interface IFlowService
     /// <summary>Creates a new, disabled flow from a document (new id and timestamps).</summary>
     /// <exception cref="ArgumentException">Wrong format marker, unsupported (newer) version, or invalid content (400).</exception>
     Flow Import(FlowDocument document);
+
+    /// <summary>Puts a flow of a backup back with its ORIGINAL id (so restoring a file twice makes no copies), disabled. Returns false, changing nothing, when a flow with that id exists.</summary>
+    /// <exception cref="ArgumentException">Bad id, name or definition (400).</exception>
+    bool Restore(BackupFlow flow);
 }

@@ -13,6 +13,11 @@
   </PropertyGroup>
 
   <ItemGroup>
+    <!-- Where "Check for updates" looks for the latest GitHub release. Change it here if the repository moves. -->
+    <AssemblyMetadata Include="RepositoryUrl" Value="https://github.com/NASAboy342/Tammoa" />
+  </ItemGroup>
+
+  <ItemGroup>
     <PackageReference Include="Microsoft.Data.Sqlite" Version="8.*" />
     <PackageReference Include="Microsoft.Extensions.DependencyInjection" Version="8.0.*" />
     <PackageReference Include="Microsoft.Extensions.FileProviders.Embedded" Version="8.0.*" />

@@ -11,12 +11,13 @@ const nav: { name: string; label: string; icon: IconName }[] = [
   { name: 'flows', label: 'Flows', icon: 'git-branch' },
   { name: 'connections', label: 'Connections', icon: 'plug' },
   { name: 'agent', label: 'Agent', icon: 'bot' },
+  { name: 'settings', label: 'Settings', icon: 'sliders' },
 ]
 const theme = useThemeStore()
 const app = useAppStore()
 const runs = useRunStore()
 onMounted(() => {
-  void app.load()
+  void app.start() // version, settings and (if switched on) one update check
   runs.connect() // live run state is pushed by the backend
 })
 onUnmounted(() => runs.disconnect())
@@ -41,6 +42,23 @@ onUnmounted(() => runs.disconnect())
         </RouterLink>
       </nav>
       <span class="flex-1" />
+      <RouterLink
+        v-if="app.update?.updateAvailable"
+        :to="{ name: 'settings' }"
+        class="inline-flex items-center gap-1.5 rounded-md border border-dashed border-ink px-2 py-1 text-xs font-semibold hover:bg-surface-hover"
+        :title="`Version ${app.update.latestVersion} is available`"
+        data-testid="update-available"
+      >
+        <AppIcon name="download" :size="13" /> Update {{ app.update.latestVersion }}
+      </RouterLink>
+      <span
+        v-if="runs.lost && !app.error"
+        class="inline-flex items-center gap-1.5 rounded-md border-2 border-dashed border-ink px-2 py-1 text-xs font-semibold"
+        title="The live connection to the app's engine dropped. It reconnects by itself; runs may not update until it does."
+        data-testid="reconnecting"
+      >
+        <AppIcon name="refresh" :size="13" class="animate-spin" /> Reconnecting
+      </span>
       <span
         class="inline-flex items-center gap-1.5 rounded-md px-2 py-1 text-xs font-semibold"
         :class="app.error ? 'bg-ink text-on-ink' : 'border border-ink'"

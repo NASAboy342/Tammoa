@@ -1,4 +1,5 @@
 using Newtonsoft.Json.Linq;
+using Tammoa.Helper;
 using Tammoa.Models;
 using Tammoa.Repositories;
 
@@ -126,6 +127,17 @@ public class FlowService : IFlowService
         _repository.Insert(flow);
         _data.ImportFlowData(flow.Id, flow.Definition, document.Data);
         return flow;
+    }
+
+    public bool Restore(BackupFlow backup)
+    {
+        if (!BackupIds.IsValid(backup.Id)) throw new ArgumentException($"'{backup.Id}' is not a valid flow id.");
+        if (_repository.Get(backup.Id) is not null) return false;
+        var now = _time.GetUtcNow();
+        var flow = new Flow(backup.Id, ValidName(backup.Name), ValidDescription(backup.Description), false, ValidDefinition(backup.Definition), now, now);
+        _repository.Insert(flow);
+        _data.ImportFlowData(flow.Id, flow.Definition, backup.Data);
+        return true;
     }
 
     private void Save(Flow flow)

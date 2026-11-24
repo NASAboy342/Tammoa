@@ -45,6 +45,9 @@ internal static class Program
         services.AddSingleton(TimeProvider.System);
         services.AddSingleton<IFlowRepository>(_ => new FlowRepository(DataPaths.DatabaseFile()));
         services.AddSingleton<IFlowService, FlowService>();
+        services.AddSingleton<ISettingsRepository>(_ => new SettingsRepository(Path.Combine(DataPaths.DataDir(), "settings.json")));
+        services.AddSingleton<ISettingsService, SettingsService>();
+        services.AddSingleton<IFolderOpener, FolderOpener>();
         services.AddSingleton<ITemplateEngine, TemplateEngine>();
         services.AddSingleton<IProcessRunner, ProcessRunner>();
         services.AddSingleton<ICardType, ManualTriggerCard>();
@@ -76,6 +79,10 @@ internal static class Program
         services.AddSingleton<ICardOptionsService, CardOptionsService>();
         services.AddSingleton<ICardRegistry, CardRegistry>();
         services.AddSingleton<IFlowDefinitionValidator, FlowDefinitionValidator>();
+        services.AddSingleton<IUpdateService>(sp => new UpdateService(sp.GetRequiredService<HttpClient>(), sp.GetRequiredService<IAppInfoService>(), UpdateService.RepositoryUrlOf(typeof(Program).Assembly)));
+        services.AddSingleton<IBackupService>(sp => new BackupService(sp.GetRequiredService<IFlowService>(), sp.GetRequiredService<IConnectionService>(), sp.GetRequiredService<IDataService>(),
+            sp.GetRequiredService<IAppInfoService>(), sp.GetRequiredService<IFolderOpener>(), sp.GetRequiredService<TimeProvider>(), Path.Combine(DataPaths.DataDir(), "backups")));
+        services.AddSingleton<IFlowTemplateService, FlowTemplateService>();
         services.AddSingleton<IAgentAccessRepository>(_ => new AgentAccessRepository(Path.Combine(DataPaths.DataDir(), "agent-access.json")));
         services.AddSingleton<IAgentAccessService>(sp => new AgentAccessService(sp.GetRequiredService<IAgentAccessRepository>(), sp.GetRequiredService<ICardRegistry>(), apiUrl));
         services.AddSingleton<IFlowExecutor, FlowExecutor>();
@@ -91,6 +98,7 @@ internal static class Program
         app.MapConnectionEndpoints(provider.GetRequiredService<IConnectionService>());
         app.MapDataEndpoints(provider.GetRequiredService<IDataService>());
         app.MapRunEndpoints(provider.GetRequiredService<IRunService>(), provider.GetRequiredService<IRunEventBus>());
+        app.MapAppSupportEndpoints(provider.GetRequiredService<ISettingsService>(), provider.GetRequiredService<IUpdateService>(), provider.GetRequiredService<IBackupService>(), provider.GetRequiredService<IFlowTemplateService>());
         app.MapAgentEndpoints(provider.GetRequiredService<IAgentAccessService>());
 
 #if DEBUG

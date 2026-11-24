@@ -11,6 +11,8 @@ export const useRunStore = defineStore('runs', () => {
   const runs = ref<Record<string, FlowRun>>({})
   const error = ref<string | null>(null)
   const connected = ref(false)
+  /** The live connection to the backend dropped (it stopped, or restarted). It reconnects by itself; this is only to say so on screen. */
+  const lost = ref(false)
   const data = useDataStore()
   let watchedFlow: string | null = null
   let close: (() => void) | null = null
@@ -51,10 +53,12 @@ export const useRunStore = defineStore('runs', () => {
       upsert,
       () => {
         connected.value = true
+        lost.value = false
         if (watchedFlow) void loadForFlow(watchedFlow) // catch up on anything missed while disconnected
       },
       (removed) => drop(removed.runId),
       (changed) => data.changed(changed.flowId, changed.cardId),
+      () => (lost.value = true),
     )
   }
 
@@ -62,6 +66,7 @@ export const useRunStore = defineStore('runs', () => {
     close?.()
     close = null
     connected.value = false
+    lost.value = false
   }
 
   async function start(flowId: string, input?: unknown): Promise<FlowRun> {
@@ -104,5 +109,5 @@ export const useRunStore = defineStore('runs', () => {
     }
   }
 
-  return { runs, error, connected, upsert, drop, forFlow, loadForFlow, connect, disconnect, start, cancel, clear, remove }
+  return { runs, error, connected, lost, upsert, drop, forFlow, loadForFlow, connect, disconnect, start, cancel, clear, remove }
 })

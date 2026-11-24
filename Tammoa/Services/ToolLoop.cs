@@ -84,7 +84,7 @@ public class ToolLoop : IToolLoop
             var before = thinking.Length;
             SetPhase("model", step);
             Report(lastText); // at once: the UI starts its "waiting for the model" timer before the first byte arrives
-            var turn = await _ollama.ChatTurnAsync(r.Connection, new OllamaTurnRequest(r.Model, messages, schemas, r.Temperature, r.MaxTokens, r.Think), r.Timeout, ct,
+            var turn = await _ollama.ChatTurnAsync(r.Connection, new OllamaTurnRequest(r.Model, messages, schemas, r.Temperature, r.MaxTokens, r.Think, r.NumCtx), r.Timeout, ct,
                 (thinkingSoFar, textSoFar) => progress?.Invoke(Live(textSoFar, thinking.ToString(0, before) + thinkingSoFar)));
             var chat = turn.Chat;
             if (chat.Thinking is not null) thinking.Append(chat.Thinking);

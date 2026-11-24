@@ -1,4 +1,5 @@
 using Newtonsoft.Json.Linq;
+using Tammoa.Helper;
 using Tammoa.Models;
 using Tammoa.Repositories;
 using Tammoa.Services.Cards;
@@ -82,6 +83,30 @@ public class DataService : IDataService
             if (!string.IsNullOrEmpty(text)) data[(string)n["id"]!] = text;
         }
         return data;
+    }
+
+    public JObject ExportShared()
+    {
+        var o = new JObject();
+        foreach (var (name, text) in _repo.ListShared()) if (text.Length > 0) o[name] = text;
+        return o;
+    }
+
+    public int ImportShared(JObject? texts)
+    {
+        if (texts is null) return 0;
+        var added = 0;
+        foreach (var p in texts.Properties())
+        {
+            if (DataNames.Problem(p.Name) is not null || p.Value.Type != JTokenType.String) continue;
+            var text = (string)p.Value!;
+            if (text.Length > IDataService.MaxLength) continue;
+            var where = new DataLocation(DataScope.Shared, "", "", p.Name);
+            if (_repo.Read(where) is not null) continue; // never overwrite what is already here
+            _repo.Write(where, text);
+            added++;
+        }
+        return added;
     }
 
     public void ImportFlowData(string flowId, JObject definition, JObject? data)

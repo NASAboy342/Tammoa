@@ -134,6 +134,7 @@ export const ICONS = {
   ungroup: [rect(3, 3, 8, 8, 1), rect(13, 13, 8, 8, 1), path('M17 3h1a3 3 0 0 1 3 3v1'), path('M7 21H6a3 3 0 0 1-3-3v-1')],
   resize: [line(21, 15, 15, 21), line(21, 9, 9, 21)],
   flag: [path('M4 15s1-1 4-1 5 2 8 2 4-1 4-1V3s-1 1-4 1-5-2-8-2-4 1-4 1z'), line(4, 22, 4, 15)],
+  folder: [path('M20 20a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-7.9a2 2 0 0 1-1.69-.9L9.6 3.9A2 2 0 0 0 7.93 3H4a2 2 0 0 0-2 2v13a2 2 0 0 0 2 2Z')],
 } satisfies Record<string, IconShape[]>
 
 export type IconName = keyof typeof ICONS

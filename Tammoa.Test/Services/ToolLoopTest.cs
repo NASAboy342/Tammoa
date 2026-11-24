@@ -62,6 +62,16 @@ public class ToolLoopTest
             new ToolContext(_root, hosts ?? []), approver, maxSteps);
 
     [Test]
+    public async Task TheContextSize_IsAskedOnEveryModelCall()
+    {
+        _turns.Enqueue(Call((ToolIds.WriteFile, new { path = "a.txt", content = "hello" })));
+        _turns.Enqueue(Say("Done."));
+        await _sut.RunAsync(Req() with { NumCtx = 16384 }, null, default);
+        var asked = _ollama.ReceivedCalls().Where(c => c.GetMethodInfo().Name == nameof(IOllamaClient.ChatTurnAsync)).Select(c => ((OllamaTurnRequest)c.GetArguments()[1]!).NumCtx).ToList();
+        Assert.That(asked, Is.EqualTo(new int?[] { 16384, 16384 }));
+    }
+
+    [Test]
     public async Task TheModelCallsATool_TheResultGoesBack_AndTheFinalAnswerEndsTheLoop()
     {
         _turns.Enqueue(Call((ToolIds.WriteFile, new { path = "a.txt", content = "hello" })));

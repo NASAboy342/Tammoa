@@ -82,6 +82,11 @@ const iconBtn = 'inline-flex h-7 w-7 shrink-0 items-center justify-center rounde
       <AppIcon name="plug" :size="40" class="mx-auto text-muted" />
       <p class="mt-2 text-ink-soft">No connections yet</p>
       <p class="text-xs text-muted">Add your Ollama server to use AI cards.</p>
+      <ol class="mx-auto mt-4 max-w-md space-y-1.5 text-left text-xs text-ink-soft" data-testid="connections-help">
+        <li class="flex items-start gap-2"><AppIcon name="download" :size="13" class="mt-0.5 shrink-0" /> <span>Install <strong>Ollama</strong> (ollama.com) on this computer, or on another one you can reach.</span></li>
+        <li class="flex items-start gap-2"><AppIcon name="terminal" :size="13" class="mt-0.5 shrink-0" /> <span>Download a model in a terminal, for example <span class="font-mono">ollama pull qwen3:14b</span> (a model that supports tools if the AI should act).</span></li>
+        <li class="flex items-start gap-2"><AppIcon name="plug" :size="13" class="mt-0.5 shrink-0" /> <span>Press <strong>New connection</strong>. The address is usually <span class="font-mono">http://localhost:11434</span>. Then <strong>Test</strong> shows its models.</span></li>
+      </ol>
     </div>
 
     <ul v-else class="space-y-2" data-testid="connection-list">

@@ -362,3 +362,59 @@ test('form fields carry a leading icon', async ({ page }) => {
     expect(count, id).toBeGreaterThanOrEqual(1)
   }
 })
+
+test('settings page, template dialog and the welcome: every clickable has an icon', async ({ page, request }) => {
+  await page.goto('/#/settings')
+  await page.getByTestId('settings-backup').waitFor()
+  await page.getByTestId('backup-now').click()
+  await page.locator('[data-testid^="backup-row-"]').first().waitFor()
+  expect(await withoutIcon(page), 'settings page with a backup listed').toEqual([])
+  await page.route('**/api/app/update', (route) => route.fulfill({ json: { currentVersion: '0.1.0', latestVersion: '9.9.9', updateAvailable: true, url: 'https://github.com/x/y/releases' } }))
+  await page.getByTestId('check-updates').click()
+  await page.getByTestId('update-url').waitFor()
+  expect(await withoutIcon(page), 'settings page with an update available').toEqual([])
+  await page.getByTestId('backup-file-input').setInputFiles({ name: 'x.json', mimeType: 'application/json', buffer: Buffer.from('nope') })
+  await page.getByTestId('restore-error').waitFor()
+  expect(await withoutIcon(page), 'settings page with a restore error').toEqual([])
+
+  await page.goto('/#/')
+  await page.getByTestId('from-template').click()
+  await page.getByTestId('template-dialog').waitFor()
+  expect(await withoutIcon(page), 'template dialog (no AI)').toEqual([])
+  await page.getByTestId('template-summarize-text').click()
+  expect(await withoutIcon(page), 'template dialog (AI template)').toEqual([])
+  const fake = await startFakeOllama()
+  try {
+    const conn = await (await request.post('/api/connections', { data: { name: `Icons ${Date.now()}`, provider: 'ollama', baseUrl: fake.url } })).json()
+    await page.getByTestId('template-cancel').click()
+    await page.getByTestId('from-template').click()
+    await page.getByTestId('template-summarize-text').click()
+    await page.getByTestId('template-connection').selectOption(conn.id)
+    await expect(page.getByTestId('template-model')).toBeEnabled()
+    expect(await withoutIcon(page), 'template dialog with connection and model').toEqual([])
+    await request.delete(`/api/connections/${conn.id}`)
+  } finally {
+    await fake.close()
+  }
+
+  await page.getByTestId('template-cancel').click()
+  await page.route(/\/api\/flows$/, (route) => (route.request().method() === 'GET' ? route.fulfill({ json: [] }) : route.fallback()))
+  await page.reload()
+  await page.getByTestId('welcome-title').waitFor()
+  expect(await withoutIcon(page), 'welcome (no flows)').toEqual([])
+  await page.route(/\/api\/connections$/, (route) => (route.request().method() === 'GET' ? route.fulfill({ json: [] }) : route.fallback()))
+  await page.goto('/#/connections')
+  await page.getByTestId('connections-help').waitFor()
+  expect(await withoutIcon(page), 'connections help (no connections)').toEqual([])
+})
+
+test('the top bar with an update available and a lost connection: every clickable has an icon', async ({ page }) => {
+  // the settings are faked for this page only: a real change would leak into tests running at the same time
+  await page.route('**/api/settings', (route) => route.fulfill({ json: { checkUpdatesAtStart: true } }))
+  await page.route('**/api/app/update', (route) => route.fulfill({ json: { currentVersion: '0.1.0', latestVersion: '9.9.9', updateAvailable: true } }))
+  await page.route('**/api/events', (route) => route.abort())
+  await page.goto('/#/')
+  await page.getByTestId('update-available').waitFor()
+  await page.getByTestId('reconnecting').waitFor({ timeout: 15_000 })
+  expect(await withoutIcon(page), 'top bar').toEqual([])
+})

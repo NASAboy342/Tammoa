@@ -67,6 +67,7 @@ Settings can contain `{{ … }}` references, replaced when the card runs:
 - Needs a **connection** and a **model** that exists on it. Reasoning (`think`) `off` is much faster for simple tasks.
 - **Tools are off by default** (`tools` empty): the card only answers. Tick tools only when the user asks for an AI that acts. Then `toolRoot` (an absolute existing folder) limits the file and script tools, `allowedHosts` limits web access, and an optional `approverModel` must approve every call. Choose a model that supports tool calling (for example `qwen3`); tell the user the folder you set.
 - A card that writes web pages can use the `check_page` tool to find its own errors.
+- For a long prompt or an AI that uses tools set `numCtx` (context size, for example `16384`): the server default is small (about 2048-4096 tokens) and silently drops the start of a long task. Leave it empty for short questions.
 - Local models are slow: give long tasks a generous `timeoutSeconds` (silence timeout) and mention it to the user.
 
 ## Good practice

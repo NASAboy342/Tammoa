@@ -3,10 +3,10 @@ using Tammoa.Models;
 
 namespace Tammoa.Services;
 
-public record OllamaChatRequest(string Model, string? System, string Prompt, double? Temperature, int? MaxTokens, bool JsonMode, bool? Think);
+public record OllamaChatRequest(string Model, string? System, string Prompt, double? Temperature, int? MaxTokens, bool JsonMode, bool? Think, int? NumCtx = null);
 
 /// <summary>One model call with a full message list (for tool loops). <see cref="Tools"/> are OpenAI-style function schemas ({ type:"function", function:{ name, description, parameters } }).</summary>
-public record OllamaTurnRequest(string Model, JArray Messages, JArray? Tools, double? Temperature, int? MaxTokens, bool? Think);
+public record OllamaTurnRequest(string Model, JArray Messages, JArray? Tools, double? Temperature, int? MaxTokens, bool? Think, int? NumCtx = null);
 
 /// <summary>What the model answered in one turn, plus the tool calls it asked for ([{ name, arguments }], arguments always an object).</summary>
 public record OllamaTurnResult(OllamaChatResult Chat, IReadOnlyList<(string Name, JObject Arguments)> ToolCalls);

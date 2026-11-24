@@ -4,7 +4,8 @@ import type { FlowRun } from '@/services/runApi'
 
 const start = vi.fn()
 vi.mock('@/services/runApi', () => ({ runApi: { start: (...a: unknown[]) => start(...a), listForFlow: vi.fn(async () => []), cancel: vi.fn() } }))
-vi.mock('@/services/eventsApi', () => ({ connectRunEvents: vi.fn(() => () => {}) }))
+const connectRunEvents = vi.fn((..._args: unknown[]) => () => {})
+vi.mock('@/services/eventsApi', () => ({ connectRunEvents: (...a: unknown[]) => connectRunEvents(...a) }))
 
 import { useRunStore } from '../runStore'
 
@@ -54,5 +55,33 @@ describe('runStore snapshots', () => {
     store.upsert({ ...run(1), id: 'new', startedAt: '2026-01-02T00:00:00Z' })
     store.upsert({ ...run(1), id: 'other', flowId: 'g' })
     expect(store.forFlow('f').map((r) => r.id)).toEqual(['new', 'old'])
+  })
+})
+
+describe('runStore live connection', () => {
+  beforeEach(() => {
+    setActivePinia(createPinia())
+    connectRunEvents.mockClear()
+  })
+
+  it('says the connection was lost, and that it is back when the stream opens again', () => {
+    const store = useRunStore()
+    store.connect()
+    const [, onOpen, , , onLost] = connectRunEvents.mock.calls[0] as [unknown, () => void, unknown, unknown, () => void]
+    expect(store.lost).toBe(false)
+    onOpen()
+    expect(store.connected).toBe(true)
+    onLost()
+    expect(store.lost).toBe(true)
+    onOpen() // the browser reconnected by itself
+    expect(store.lost).toBe(false)
+  })
+
+  it('forgets a lost connection when it is closed on purpose', () => {
+    const store = useRunStore()
+    store.connect()
+    ;(connectRunEvents.mock.calls[0] as unknown as [unknown, unknown, unknown, unknown, () => void])[4]()
+    store.disconnect()
+    expect(store.lost).toBe(false)
   })
 })

@@ -29,21 +29,22 @@ public class OllamaClient : IOllamaClient
         var messages = new JArray();
         if (!string.IsNullOrWhiteSpace(r.System)) messages.Add(new JObject { ["role"] = "system", ["content"] = r.System });
         messages.Add(new JObject { ["role"] = "user", ["content"] = r.Prompt });
-        var body = BuildBody(r.Model, messages, null, r.Temperature, r.MaxTokens, r.Think);
+        var body = BuildBody(r.Model, messages, null, r.Temperature, r.MaxTokens, r.Think, r.NumCtx);
         if (r.JsonMode) body["format"] = "json";
         return (await StreamChatAsync(c, body, r.Model, timeout, ct, onDelta)).Chat;
     }
 
     public Task<OllamaTurnResult> ChatTurnAsync(Connection c, OllamaTurnRequest r, TimeSpan timeout, CancellationToken ct, Action<string, string>? onDelta = null) =>
-        StreamChatAsync(c, BuildBody(r.Model, r.Messages, r.Tools, r.Temperature, r.MaxTokens, r.Think), r.Model, timeout, ct, onDelta);
+        StreamChatAsync(c, BuildBody(r.Model, r.Messages, r.Tools, r.Temperature, r.MaxTokens, r.Think, r.NumCtx), r.Model, timeout, ct, onDelta);
 
-    private static JObject BuildBody(string model, JArray messages, JArray? tools, double? temperature, int? maxTokens, bool? think)
+    private static JObject BuildBody(string model, JArray messages, JArray? tools, double? temperature, int? maxTokens, bool? think, int? numCtx = null)
     {
         var body = new JObject { ["model"] = model, ["messages"] = messages, ["stream"] = true };
         if (tools is { Count: > 0 }) body["tools"] = tools;
         var options = new JObject();
         if (temperature is { } t) options["temperature"] = t;
         if (maxTokens is { } n) options["num_predict"] = n;
+        if (numCtx is { } c) options["num_ctx"] = c;
         if (options.HasValues) body["options"] = options;
         if (think is { } th) body["think"] = th;
         return body;

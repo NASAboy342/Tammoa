@@ -1,5 +1,6 @@
 using Newtonsoft.Json.Linq;
 using Tammoa.Enums;
+using Tammoa.Helper;
 using Tammoa.Models;
 using Tammoa.Repositories;
 
@@ -48,6 +49,15 @@ public class ConnectionService : IConnectionService
             now, now);
         _connections.Insert(connection);
         return ToInfo(connection);
+    }
+
+    public bool Restore(BackupConnection b)
+    {
+        if (!BackupIds.IsValid(b.Id)) throw new ArgumentException($"'{b.Id}' is not a valid connection id.");
+        if (_connections.Get(b.Id) is not null) return false;
+        var now = _time.GetUtcNow();
+        _connections.Insert(new Connection(b.Id, ValidName(b.Name), b.Provider, ValidUrl(b.BaseUrl), null, now, now));
+        return true;
     }
 
     public ConnectionInfo Update(string id, SaveConnectionRequest r)

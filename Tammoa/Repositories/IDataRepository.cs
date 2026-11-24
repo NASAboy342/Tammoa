@@ -10,6 +10,7 @@ public interface IDataRepository
     string? Read(DataLocation location);                 // null when nothing was saved yet
     DateTimeOffset? Modified(DataLocation location);
     void Write(DataLocation location, string text);      // atomic: a crash never leaves half a file
+    IReadOnlyList<(string Name, string Text)> ListShared(); // file name without .txt -> text, for a backup
     void DeleteFlow(string flowId);                      // removes every flow-scoped file of the flow
     void CopyFlow(string fromFlowId, string toFlowId);   // for "duplicate flow"
 }

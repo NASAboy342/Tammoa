@@ -35,6 +35,8 @@ public class OllamaCard : ICardType
             new CardParamInfo("system", "System prompt (optional)", ParamKind.Code, CodeLanguage: "text"),
             new CardParamInfo("temperature", "Temperature (optional)", ParamKind.Number, Help: "Empty = the model's default."),
             new CardParamInfo("maxTokens", "Max tokens (optional)", ParamKind.Number, Help: "Empty = no limit."),
+            new CardParamInfo("numCtx", "Context size in tokens (optional)", ParamKind.Number,
+                Help: "How much the model can read at once (prompt + conversation + tool results). Empty = the server's default, which is small (often 2048 to 4096) and silently drops the START of a long task. Raise it for long prompts or tool use (for example 16384); a bigger value needs more memory and is slower. 512 to 1,000,000."),
             new CardParamInfo("jsonMode", "Answer as JSON", ParamKind.Bool, DefaultValue: false, Help: "Asks the model for valid JSON; it is also returned as { json }."),
             new CardParamInfo("think", "Reasoning (think)", ParamKind.Select, DefaultValue: "auto",
                 Options: [new("auto", "Auto (model default)"), new("on", "On"), new("off", "Off")], Help: "For reasoning models such as qwen3. Off is faster; auto sends nothing."),
@@ -74,7 +76,7 @@ public class OllamaCard : ICardType
                     new JObject { ["system"] = "You are a terse assistant. Answer in one sentence.", ["prompt"] = "{{run.input}}", ["think"] = "off" },
                     "System: You are a terse assistant. Answer in one sentence.\nPrompt: {{run.input}}", "text", RunInput: "Why is the sky blue?", Result: "A one-sentence answer in {{input.text}}."),
             ],
-            ["Output fields: text (the answer), json (JSON mode), thinking (reasoning models), model, promptTokens, responseTokens, totalDurationMs.", "Small models work best with short, direct prompts. Reasoning Off is much faster for models like qwen3.", "The first call loads the model into memory and can take a while; the timeout is 120 s by default.", "Tools: tick what the model may do (read file, write file, HTTP request, run script). File and script tools only work inside the Tools folder; the HTTP tool only talks to the Allowed hosts. A refused call is told to the model, it is not an error. Output then also has toolCalls (what it called, and ran / rejected / failed) and steps.", "An Approver model (a small model) can be asked about every tool call first; if it does not clearly say yes, the call is refused. Run script is only a best-effort guard (paths in the text are checked, it is not a sandbox): keep it off unless you need it, and use the approver."]),
+            ["Output fields: text (the answer), json (JSON mode), thinking (reasoning models), model, promptTokens, responseTokens, totalDurationMs.", "Small models work best with short, direct prompts. Reasoning Off is much faster for models like qwen3.", "The first call loads the model into memory and can take a while; the timeout is 120 s by default.", "Long task or tools? Set the Context size (for example 16384). Without it Ollama may use only 2048 to 4096 tokens and quietly forget the start of your prompt.", "Tools: tick what the model may do (read file, write file, HTTP request, run script). File and script tools only work inside the Tools folder; the HTTP tool only talks to the Allowed hosts. A refused call is told to the model, it is not an error. Output then also has toolCalls (what it called, and ran / rejected / failed) and steps.", "An Approver model (a small model) can be asked about every tool call first; if it does not clearly say yes, the call is refused. Run script is only a best-effort guard (paths in the text are checked, it is not a sandbox): keep it off unless you need it, and use the approver."]),
     };
 
     public async Task<CardResult> ExecuteAsync(CardExecutionContext context, CancellationToken ct)
@@ -100,6 +102,8 @@ public class OllamaCard : ICardType
         if (maxTokens is < 1 or > 1_000_000) throw new ArgumentException("Max tokens must be at least 1.");
         var seconds = ParamReader.GetInt(context.Params, "timeoutSeconds", 120);
         if (seconds < 1 || seconds > 1800) throw new ArgumentException("Timeout must be between 1 and 1800 seconds.");
+        var numCtx = ParamReader.GetOptionalDouble(context.Params, "numCtx");
+        if (numCtx is < 512 or > 1_000_000 || numCtx is { } nc && nc != Math.Floor(nc)) throw new ArgumentException("Context size must be a whole number between 512 and 1,000,000 (or empty).");
         var jsonMode = ParamReader.GetBool(context.Params, "jsonMode", false);
         bool? think = ParamReader.GetString(context.Params, "think") switch { "on" => true, "off" => false, "" or "auto" => null, var other => throw new ArgumentException($"Unknown think setting '{other}'.") };
 
@@ -125,11 +129,11 @@ public class OllamaCard : ICardType
 
             return (await _loop.RunAsync(new ToolLoopRequest(connection, model, system, prompt, temperature, maxTokens is { } mt ? (int)mt : null, think, TimeSpan.FromSeconds(seconds),
                 toolIds, new ToolContext(root, hosts, ParamReader.GetBool(context.Params, "limitPageNetwork", false)), approver.Length > 0 ? approver : null, maxSteps,
-                ParamReader.GetString(context.Params, "approverPrompt").Trim() is { Length: > 0 } custom ? custom : null), context.Progress, ct));
+                ParamReader.GetString(context.Params, "approverPrompt").Trim() is { Length: > 0 } custom ? custom : null, numCtx is { } c1 ? (int)c1 : null), context.Progress, ct));
         }
 
         var result = await _ollama.ChatAsync(connection,
-            new OllamaChatRequest(model, system, prompt, temperature, maxTokens is { } m ? (int)m : null, jsonMode, think),
+            new OllamaChatRequest(model, system, prompt, temperature, maxTokens is { } m ? (int)m : null, jsonMode, think, numCtx is { } c2 ? (int)c2 : null),
             TimeSpan.FromSeconds(seconds), ct,
             (thinkingSoFar, textSoFar) =>
             {

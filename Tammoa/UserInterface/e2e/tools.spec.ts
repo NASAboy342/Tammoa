@@ -193,3 +193,45 @@ test.describe('AI tools: the live action', () => {
     }
   })
 })
+
+test.describe('AI card: context size', () => {
+  test('type a context size, save, reload: it is kept, and the model is asked for exactly that', async ({ page, request }) => {
+    const fake = await startFakeOllama()
+    try {
+      const flow = await aiFlow(request, fake.url)
+      await open(page, flow.id)
+      await node(page, 'ai').click()
+      await expect(page.getByTestId('param-numCtx')).toContainText('Context size')
+      await expect(page.getByTestId('param-numCtx')).toContainText('2048') // the help explains the small server default
+      await page.getByTestId('param-input-numCtx').fill('16384')
+      await page.getByTestId('edit-save').click()
+      await expect(page.getByTestId('edit-save')).toBeDisabled()
+
+      await page.reload()
+      await node(page, 'ai').click()
+      await expect(page.getByTestId('param-input-numCtx')).toHaveValue('16384')
+      await page.getByTestId('run').click()
+      await expect(node(page, 'ai')).toHaveAttribute('data-status', 'succeeded')
+      expect(fake.chats().at(-1)!.body.options.num_ctx).toBe(16384)
+    } finally {
+      await fake.close()
+    }
+  })
+
+  test('left empty, nothing is sent (the server default stays); a silly value is refused with a reason', async ({ request }) => {
+    const fake = await startFakeOllama()
+    try {
+      const empty = await aiFlow(request, fake.url)
+      const run = await runAndWait(request, empty.id)
+      expect(run.status).toBe('succeeded')
+      expect(fake.chats().at(-1)!.body.options?.num_ctx).toBeUndefined()
+
+      const silly = await aiFlow(request, fake.url, { numCtx: 100 })
+      const bad = await runAndWait(request, silly.id)
+      expect(bad.status).toBe('failed')
+      expect(bad.nodes.find((n) => n.nodeId === 'ai')!.error).toContain('Context size must be a whole number between 512 and 1,000,000')
+    } finally {
+      await fake.close()
+    }
+  })
+})

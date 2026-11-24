@@ -69,6 +69,23 @@ public class OllamaClientTest
     }
 
     [Test]
+    public async Task NumCtx_IsSentAsAnOllamaOption_ForAChatAndForAToolTurn_AndOnlyWhenSet()
+    {
+        var done = Lines(new { message = new { content = "ok" }, done = true });
+        var chat = Stream(done);
+        await new OllamaClient(new HttpClient(chat)).ChatAsync(Conn(), new OllamaChatRequest("m", null, "p", null, null, false, null, 16384), TimeSpan.FromSeconds(5), default);
+        Assert.That((int)JObject.Parse(chat.Seen[0].Body)["options"]!["num_ctx"]!, Is.EqualTo(16384));
+
+        var turn = Stream(done);
+        await new OllamaClient(new HttpClient(turn)).ChatTurnAsync(Conn(), new OllamaTurnRequest("m", new JArray(), null, null, null, null, 8192), TimeSpan.FromSeconds(5), default);
+        Assert.That((int)JObject.Parse(turn.Seen[0].Body)["options"]!["num_ctx"]!, Is.EqualTo(8192));
+
+        var none = Stream(done);
+        await new OllamaClient(new HttpClient(none)).ChatAsync(Conn(), new OllamaChatRequest("m", null, "p", null, null, false, null), TimeSpan.FromSeconds(5), default);
+        Assert.That(JObject.Parse(none.Seen[0].Body)["options"], Is.Null, "nothing is sent when the setting is empty: the server default stays");
+    }
+
+    [Test]
     public async Task Chat_CallsOnDeltaWithTheGrowingTexts()
     {
         var stub = Stream(Lines(

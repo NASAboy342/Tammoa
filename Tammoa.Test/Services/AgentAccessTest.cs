@@ -214,6 +214,7 @@ public class AgentAccessTest
         app.MapConnectionEndpoints(Substitute.For<IConnectionService>());
         app.MapDataEndpoints(Substitute.For<IDataService>());
         app.MapRunEndpoints(Substitute.For<IRunService>(), Substitute.For<IRunEventBus>());
+        app.MapAppSupportEndpoints(Substitute.For<ISettingsService>(), Substitute.For<IUpdateService>(), Substitute.For<IBackupService>(), Substitute.For<IFlowTemplateService>());
         app.MapAgentEndpoints(Substitute.For<IAgentAccessService>());
 
         var actual = ((IEndpointRouteBuilder)app).DataSources.SelectMany(d => d.Endpoints).OfType<RouteEndpoint>()

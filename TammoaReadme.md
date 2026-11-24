@@ -117,7 +117,29 @@ Release packaging copies `UserInterface/dist` into `Tammoa/Resources/wwwroot` (e
 
 ## Deploy
 <!-- deploy reads this section. Filled in by setup-deploy. -->
-TBD — run `setup-deploy`. Ready for it: the app icon (`Tammoa/AppIcon/app.ico`, `app.icns`), the update source (`RepositoryUrl` in `Tammoa/Tammoa.csproj`: the update check reads the latest **GitHub release** of that repository, so the version of a release tag, for example `v0.2.0`, must be higher than `<Version>`).
+Desktop app, two installers built by GitHub Actions from one tag: a macOS `.dmg` (Apple Silicon, `osx-arm64`) and a Windows installer (`win-x64`, Inno Setup). Both are **self-contained single files** (no .NET to install), with `AppIcon/` and `wwwroot/` (the built UI) loose next to the executable.
+
+| File | What it does |
+|---|---|
+| `scripts/package-macos.sh [osx-arm64\|osx-x64]` | builds the UI (`npm run build`: type-check + Vite), copies it into `Tammoa/wwwroot`, publishes, assembles `Deployed/MacOs/Tammoa.app` (bundle id `net.ppiinn.tammoa`), ad-hoc signs it, makes `Deployed/MacOs/Tammoa.dmg` |
+| `scripts/package-windows.ps1` | same steps on Windows, then Inno Setup (`ISCC.exe`) with `scripts/windows-installer.iss` -> `Deployed/Windows/Tammoa-<version>-win-x64-setup.exe` |
+| `.github/workflows/release.yml` | on a `vX.Y.Z` tag: builds both in parallel and creates a GitHub Release with both files and generated notes. `workflow_dispatch` builds both **without** releasing (a test run) |
+
+The Windows `AppId` GUID in `windows-installer.iss` identifies the app for upgrades and uninstalls: **never change it**.
+
+**Steps (the `deploy` skill follows these; the user does every push and tag):**
+1. **Preflight:** clean tree on the release branch; `dotnet test`; in `Tammoa/UserInterface`: `npm run typecheck`, `npm run test:unit`, and (with the dev servers running and a disposable `TAMMOA_DATA_DIR`) `npx playwright test --project=chromium`.
+2. **Version:** the only source is `<Version>` in `Tammoa/Tammoa.csproj`. Choose the bump, edit it, the user commits. The tag must be `v` + that version and must be higher than the previous release (the in-app update check compares them).
+3. **Local check (optional, macOS):** `scripts/package-macos.sh osx-arm64`, then open `Deployed/MacOs/Tammoa.app`. Output in `Deployed/` is never committed.
+4. **Release (the user):** `git tag vX.Y.Z && git push origin vX.Y.Z`. Test the pipeline first without releasing: `gh workflow run release.yml`.
+5. **Watch:** `gh run watch`; on failure `gh run view <id> --log-failed`.
+6. **Verify:** `gh release view vX.Y.Z` shows both files (`Tammoa-X.Y.Z-osx-arm64.dmg`, `Tammoa-X.Y.Z-win-x64-setup.exe`) and is not a draft; install one, start it, then Settings > *Check for updates* says "You have the latest version".
+
+**Known limitations**
+- **Unsigned.** macOS: the `.dmg` is only ad-hoc signed, so another Mac shows "unidentified developer" (right-click > Open the first time; or a paid Apple Developer ID plus notarization later). Windows: SmartScreen warns at first run (needs a code-signing certificate to remove).
+- Only **Apple Silicon** macOS is built in CI; for Intel run the script with `osx-x64`.
+- **No in-app update yet:** *Check for updates* tells the user a newer release exists; they download and install it themselves. Installing over the old version keeps their data (it lives in the user data folder, not the install folder).
+- Not yet exercised in CI: the Windows build and the tag-triggered release (the macOS package was built and run locally: UI, API, database and a template flow all worked).
 
 ## Versioning
 Single source of truth: `<Version>` in `Tammoa/Tammoa.csproj` — frontend `package.json` version is not used.

@@ -3,6 +3,9 @@ bin/
 obj/
 *.user
 Deployed/
+# built UI copied here by the packaging scripts (only .gitkeep is tracked)
+Tammoa/wwwroot/*
+!Tammoa/wwwroot/.gitkeep
 TestResults/
 
 # Frontend

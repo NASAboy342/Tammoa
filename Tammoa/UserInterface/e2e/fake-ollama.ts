@@ -13,9 +13,10 @@ export interface Seen {
  * /api/chat STREAMS (newline-delimited JSON, like the real one). With `hold: true` it sends the first pieces at once and then WAITS
  * until the test calls release(): that makes "the answer is visible while the model is still writing" deterministic.
  * With `holdToolCalls` the model stays SILENT (like the real one while it writes a tool call) until the test calls releaseToolCalls().
+ * With `answer` (a text, or a function of the request) the model always answers with that (for screenshots and demos).
  * With `toolScript` (and a request that offers tools) the model first asks for the scripted tool calls, one list per model call, then answers.
  */
-export async function startFakeOllama(options: { key?: string; models?: string[]; hold?: boolean; holdToolCalls?: boolean; toolScript?: { name: string; arguments: Record<string, unknown> }[][] } = {}) {
+export async function startFakeOllama(options: { key?: string; models?: string[]; hold?: boolean; holdToolCalls?: boolean; answer?: string | ((request: any) => string); toolScript?: { name: string; arguments: Record<string, unknown> }[][] } = {}) {
   const seen: Seen[] = []
   const models = options.models ?? ['tiny:1b', 'big:70b']
   let release: () => void = () => {}
@@ -54,7 +55,7 @@ export async function startFakeOllama(options: { key?: string; models?: string[]
           }
         }
         const user = [...body.messages].reverse().find((m: any) => m.role === 'user')?.content
-        const answer = `fake answer to: ${user}`
+        const answer = typeof options.answer === 'function' ? options.answer(body) : (options.answer ?? `fake answer to: ${user}`)
         const words = answer.split(/(?<= )/) // pieces that keep their trailing space
         const thoughts = body.think === true ? ['Let me think. ', 'The user asks something. ', 'I will answer plainly.'] : []
         res.writeHead(200, { 'Content-Type': 'application/x-ndjson' })

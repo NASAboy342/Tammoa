@@ -1,0 +1,376 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Tammoa: build AI automations from cards</title>
+<meta name="description" content="Tammoa is a desktop app for building automations from cards: scripts, web requests and local AI models, joined into flows you can watch run. Free download for macOS and Windows." />
+<meta property="og:title" content="Tammoa: build AI automations from cards" />
+<meta property="og:description" content="Wire scripts, web requests and local AI models into flows, and watch every card run. Your data stays on your computer." />
+<meta property="og:image" content="screenshots/editor-light.png" />
+<meta name="color-scheme" content="light dark" />
+<script>
+  // Set the theme before the first paint (no flash): saved choice, else the system setting.
+  (function () {
+    var t = null
+    try { t = localStorage.getItem('landing-theme') } catch (e) {}
+    if (t !== 'light' && t !== 'dark') t = window.matchMedia && matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light'
+    document.documentElement.setAttribute('data-theme', t)
+  })()
+</script>
+<style>
+  /* Design tokens: the same "extra-minimal" tokens as the app (colourless, outline-only, no shadows). */
+  :root {
+    color-scheme: light;
+    --bg: #ffffff; --surface: #ffffff; --surface-muted: #f6f7f9; --surface-hover: #f1f3f6;
+    --ink: #16181d; --ink-soft: #4d5560; --muted: #737b87;
+    --line: #e2e6eb; --line-strong: #c9ced6; --on-ink: #ffffff;
+    --radius: 12px; --radius-sm: 8px;
+    --font: Inter, ui-sans-serif, system-ui, -apple-system, 'Segoe UI', sans-serif;
+    --mono: ui-monospace, SFMono-Regular, Menlo, monospace;
+  }
+  [data-theme='dark'] {
+    color-scheme: dark;
+    --bg: #0a0a0b; --surface: #0a0a0b; --surface-muted: #17181b; --surface-hover: #202226;
+    --ink: #f2f3f5; --ink-soft: #b9bec7; --muted: #8b919c;
+    --line: #25272c; --line-strong: #3a3d44; --on-ink: #0a0a0b;
+  }
+  * { box-sizing: border-box; }
+  html { scroll-behavior: smooth; scroll-padding-top: 72px; }
+  body { margin: 0; background: var(--bg); color: var(--ink); font: 16px/1.6 var(--font); -webkit-font-smoothing: antialiased; }
+  a { color: inherit; }
+  img { max-width: 100%; height: auto; display: block; }
+  :focus-visible { outline: 2px solid var(--ink); outline-offset: 2px; }
+  .wrap { width: min(1080px, 100% - 32px); margin-inline: auto; }
+  .icon { width: 1em; height: 1em; flex: none; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
+  .sr-only { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
+
+  /* buttons and links with an icon (every clickable has one) */
+  .btn { display: inline-flex; align-items: center; justify-content: center; gap: 8px; min-height: 44px; padding: 0 18px; border: 1px solid var(--line-strong); border-radius: var(--radius-sm);
+    background: transparent; color: var(--ink); font: 600 14px/1 var(--font); text-decoration: none; cursor: pointer; }
+  .btn:hover { background: var(--surface-hover); }
+  .btn.primary { background: var(--ink); border-color: var(--ink); color: var(--on-ink); }
+  .btn.primary:hover { opacity: .9; background: var(--ink); }
+  .btn .icon { font-size: 18px; }
+  .btn.small { min-height: 36px; padding: 0 12px; font-size: 13px; }
+
+  /* header */
+  header { position: sticky; top: 0; z-index: 10; background: var(--bg); border-bottom: 1px solid var(--line); }
+  .bar { display: flex; align-items: center; gap: 8px; min-height: 60px; }
+  .brand { display: inline-flex; align-items: center; gap: 8px; font-weight: 800; font-size: 18px; letter-spacing: -.01em; text-decoration: none; }
+  .brand .icon { font-size: 22px; }
+  nav { display: flex; gap: 4px; margin-left: 12px; }
+  nav a { display: inline-flex; align-items: center; gap: 6px; min-height: 36px; padding: 0 10px; border-radius: var(--radius-sm); border: 1px solid transparent; font-size: 13px; font-weight: 600; color: var(--ink-soft); text-decoration: none; }
+  nav a:hover { background: var(--surface-hover); color: var(--ink); }
+  .spacer { flex: 1; }
+  .icon-btn { display: inline-flex; width: 36px; height: 36px; align-items: center; justify-content: center; border: 1px solid var(--line-strong); border-radius: var(--radius-sm); background: transparent; color: var(--ink); cursor: pointer; }
+  .icon-btn:hover { background: var(--surface-hover); }
+  [data-theme='dark'] .when-light, :root:not([data-theme='dark']) .when-dark { display: none; }
+
+  /* hero */
+  .hero { padding: 64px 0 32px; text-align: center; }
+  .pill { display: inline-flex; align-items: center; gap: 6px; padding: 4px 12px; border: 1px solid var(--line-strong); border-radius: 999px; font-size: 12px; font-weight: 600; color: var(--ink-soft); }
+  h1 { margin: 20px auto 0; max-width: 16ch; font-size: clamp(36px, 6vw, 60px); line-height: 1.05; letter-spacing: -.03em; font-weight: 800; }
+  .lead { margin: 18px auto 0; max-width: 56ch; font-size: 18px; color: var(--ink-soft); }
+  .cta { display: flex; flex-wrap: wrap; justify-content: center; gap: 10px; margin-top: 28px; }
+  .fine { margin: 12px 0 0; font-size: 13px; color: var(--muted); }
+  .frame { margin: 40px auto 0; border: 1px solid var(--line-strong); border-radius: var(--radius); overflow: hidden; background: var(--surface); }
+  .frame-bar { display: flex; gap: 6px; padding: 10px 12px; border-bottom: 1px solid var(--line); }
+  .frame-bar i { width: 10px; height: 10px; border-radius: 50%; border: 1px solid var(--line-strong); }
+  .shot-dark { display: none; }
+  [data-theme='dark'] .shot-light { display: none; }
+  [data-theme='dark'] .shot-dark { display: block; }
+
+  /* sections */
+  section { padding: 72px 0; }
+  .eyebrow { display: inline-flex; align-items: center; gap: 6px; font-size: 12px; font-weight: 700; letter-spacing: .08em; text-transform: uppercase; color: var(--muted); }
+  h2 { margin: 8px 0 0; font-size: clamp(26px, 4vw, 36px); line-height: 1.15; letter-spacing: -.02em; }
+  .sub { margin: 12px 0 0; max-width: 60ch; color: var(--ink-soft); }
+  .center { text-align: center; } .center .sub { margin-inline: auto; }
+  .grid { display: grid; gap: 14px; margin-top: 36px; grid-template-columns: repeat(auto-fit, minmax(290px, 1fr)); }
+  .card { padding: 20px; border: 1px solid var(--line); border-radius: var(--radius); }
+  .card .icon { font-size: 22px; }
+  .card h3 { margin: 12px 0 4px; font-size: 16px; }
+  .card p { margin: 0; font-size: 14px; color: var(--ink-soft); }
+  .steps { counter-reset: s; }
+  .steps .card::before { counter-increment: s; content: counter(s); display: inline-grid; place-items: center; width: 28px; height: 28px; border: 1px solid var(--ink); border-radius: 50%; font-size: 13px; font-weight: 700; }
+  .band { background: var(--surface-muted); border-block: 1px solid var(--line); }
+
+  /* screenshot tabs */
+  .tabs { display: flex; flex-wrap: wrap; justify-content: center; gap: 6px; margin-top: 28px; }
+  .tab { display: inline-flex; align-items: center; gap: 6px; min-height: 36px; padding: 0 12px; border: 1px solid var(--line-strong); border-radius: var(--radius-sm); background: transparent; color: var(--ink-soft); font: 600 13px/1 var(--font); cursor: pointer; }
+  .tab:hover { background: var(--surface-hover); }
+  .tab[aria-selected='true'] { border: 2px solid var(--ink); color: var(--ink); }
+  .panel { margin-top: 20px; }
+  .panel[hidden] { display: none; }
+  .caption { margin: 12px 0 0; text-align: center; font-size: 14px; color: var(--ink-soft); }
+
+  /* download */
+  .dl { display: grid; gap: 14px; margin-top: 36px; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); }
+  .dl .card { display: flex; flex-direction: column; gap: 6px; }
+  .dl .card.rec { border: 2px solid var(--ink); }
+  .dl .btn { margin-top: 12px; }
+  .meta { font-size: 13px; color: var(--muted); }
+  .note { display: flex; gap: 10px; margin-top: 20px; padding: 14px 16px; border: 1px dashed var(--line-strong); border-radius: var(--radius-sm); font-size: 14px; color: var(--ink-soft); }
+  .note .icon { margin-top: 3px; font-size: 16px; }
+
+  /* faq */
+  details { border: 1px solid var(--line); border-radius: var(--radius-sm); padding: 0 16px; margin-top: 10px; }
+  summary { display: flex; align-items: center; gap: 10px; min-height: 52px; cursor: pointer; font-weight: 600; list-style: none; }
+  summary::-webkit-details-marker { display: none; }
+  summary .icon { transition: transform .15s; }
+  details[open] summary .icon { transform: rotate(180deg); }
+  details p { margin: 0 0 16px; color: var(--ink-soft); font-size: 15px; }
+  code { font-family: var(--mono); font-size: .9em; padding: 1px 5px; border: 1px solid var(--line); border-radius: 4px; }
+
+  footer { border-top: 1px solid var(--line); padding: 28px 0; font-size: 13px; color: var(--muted); }
+  footer .wrap { display: flex; flex-wrap: wrap; align-items: center; gap: 12px; }
+  footer a { display: inline-flex; align-items: center; gap: 6px; }
+
+  @media (max-width: 720px) { nav { display: none; } .hero { padding-top: 40px; } section { padding: 52px 0; } }
+  @media (prefers-reduced-motion: reduce) { * { transition: none !important; scroll-behavior: auto !important; } }
+</style>
+</head>
+<body>
+
+<!-- icon sprite (Lucide-style, 24x24 stroke) -->
+<svg width="0" height="0" style="position:absolute" aria-hidden="true">
+  <symbol id="i-git-branch" viewBox="0 0 24 24"><line x1="6" y1="3" x2="6" y2="15"/><circle cx="18" cy="6" r="3"/><circle cx="6" cy="18" r="3"/><path d="M18 9a9 9 0 0 1-9 9"/></symbol>
+  <symbol id="i-download" viewBox="0 0 24 24"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></symbol>
+  <symbol id="i-moon" viewBox="0 0 24 24"><path d="M12 3a6 6 0 0 0 9 9 9 9 0 1 1-9-9Z"/></symbol>
+  <symbol id="i-sun" viewBox="0 0 24 24"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.93 4.93l1.41 1.41M17.66 17.66l1.41 1.41M2 12h2M20 12h2M6.34 17.66l-1.41 1.41M19.07 4.93l-1.41 1.41"/></symbol>
+  <symbol id="i-bot" viewBox="0 0 24 24"><path d="M12 8V4H8"/><rect x="4" y="8" width="16" height="12" rx="2"/><path d="M2 14h2M20 14h2M15 13v2M9 13v2"/></symbol>
+  <symbol id="i-layers" viewBox="0 0 24 24"><polygon points="12 2 2 7 12 12 22 7 12 2"/><polyline points="2 17 12 22 22 17"/><polyline points="2 12 12 17 22 12"/></symbol>
+  <symbol id="i-shield" viewBox="0 0 24 24"><path d="M20 13c0 5-3.5 7.5-7.66 8.95a1 1 0 0 1-.67-.01C7.5 20.5 4 18 4 13V6a1 1 0 0 1 1-1c2 0 4.5-1.2 6.24-2.72a1.17 1.17 0 0 1 1.52 0C14.51 3.81 17 5 19 5a1 1 0 0 1 1 1z"/></symbol>
+  <symbol id="i-save" viewBox="0 0 24 24"><path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"/><polyline points="17 21 17 13 7 13 7 21"/><polyline points="7 3 7 8 15 8"/></symbol>
+  <symbol id="i-zap" viewBox="0 0 24 24"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/></symbol>
+  <symbol id="i-eye" viewBox="0 0 24 24"><path d="M2 12s3-7 10-7 10 7 10 7-3 7-10 7S2 12 2 12z"/><circle cx="12" cy="12" r="3"/></symbol>
+  <symbol id="i-play" viewBox="0 0 24 24"><polygon points="6 3 20 12 6 21 6 3"/></symbol>
+  <symbol id="i-chevron-down" viewBox="0 0 24 24"><polyline points="6 9 12 15 18 9"/></symbol>
+  <symbol id="i-globe" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><path d="M2 12h20"/><path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"/></symbol>
+  <symbol id="i-laptop" viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="12" rx="2"/><line x1="2" y1="20" x2="22" y2="20"/></symbol>
+  <symbol id="i-monitor" viewBox="0 0 24 24"><rect x="2" y="3" width="20" height="14" rx="2"/><line x1="8" y1="21" x2="16" y2="21"/><line x1="12" y1="17" x2="12" y2="21"/></symbol>
+  <symbol id="i-check-circle" viewBox="0 0 24 24"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/></symbol>
+  <symbol id="i-info" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><line x1="12" y1="16" x2="12" y2="12"/><line x1="12" y1="8" x2="12.01" y2="8"/></symbol>
+  <symbol id="i-lock" viewBox="0 0 24 24"><rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></symbol>
+  <symbol id="i-code" viewBox="0 0 24 24"><polyline points="16 18 22 12 16 6"/><polyline points="8 6 2 12 8 18"/></symbol>
+  <symbol id="i-image" viewBox="0 0 24 24"><rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="9" cy="9" r="2"/><path d="m21 15-3.09-3.09a2 2 0 0 0-2.82 0L6 21"/></symbol>
+  <symbol id="i-help" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3"/><line x1="12" y1="17" x2="12.01" y2="17"/></symbol>
+  <symbol id="i-sliders" viewBox="0 0 24 24"><line x1="4" y1="21" x2="4" y2="14"/><line x1="4" y1="10" x2="4" y2="3"/><line x1="12" y1="21" x2="12" y2="12"/><line x1="12" y1="8" x2="12" y2="3"/><line x1="20" y1="21" x2="20" y2="16"/><line x1="20" y1="12" x2="20" y2="3"/><line x1="1" y1="14" x2="7" y2="14"/><line x1="9" y1="8" x2="15" y2="8"/><line x1="17" y1="16" x2="23" y2="16"/></symbol>
+</svg>
+
+<header>
+  <div class="wrap bar">
+    <a class="brand" href="#top" aria-label="Tammoa, top of the page"><svg class="icon"><use href="#i-git-branch"/></svg> Tammoa</a>
+    <nav aria-label="Main">
+      <a href="#features"><svg class="icon"><use href="#i-layers"/></svg> Features</a>
+      <a href="#preview"><svg class="icon"><use href="#i-image"/></svg> Preview</a>
+      <a href="#download"><svg class="icon"><use href="#i-download"/></svg> Download</a>
+      <a href="#faq"><svg class="icon"><use href="#i-help"/></svg> Questions</a>
+    </nav>
+    <span class="spacer"></span>
+    <button type="button" class="icon-btn" id="theme" title="Switch light / dark" aria-label="Switch light / dark">
+      <svg class="icon when-light"><use href="#i-moon"/></svg><svg class="icon when-dark"><use href="#i-sun"/></svg>
+    </button>
+  </div>
+</header>
+
+<main id="top">
+  <!-- hero -->
+  <div class="wrap hero">
+    <span class="pill"><svg class="icon"><use href="#i-lock"/></svg> Runs on your computer · your data stays local</span>
+    <h1>Build AI automations from cards</h1>
+    <p class="lead">Wire scripts, web requests and local AI models into flows, press Run, and watch every card finish. Click any card to see exactly what it received and what it produced.</p>
+    <div class="cta">
+      <a class="btn primary" id="hero-download" href="#download"><svg class="icon"><use href="#i-download"/></svg> <span id="hero-label">Download Tammoa</span></a>
+      <a class="btn" href="#preview"><svg class="icon"><use href="#i-eye"/></svg> See it in action</a>
+    </div>
+    <p class="fine" id="hero-fine">Free · macOS (Apple Silicon) and Windows</p>
+    <div class="frame">
+      <div class="frame-bar" aria-hidden="true"><i></i><i></i><i></i></div>
+      <img class="shot-light" src="screenshots/editor-light.png" width="1280" height="800" alt="The Tammoa editor: a flow of cards (manual trigger, script, IF, AI model) after a run, with the output of the AI card on the right" fetchpriority="high" />
+      <img class="shot-dark" src="screenshots/editor-dark.png" width="1280" height="800" alt="The Tammoa editor in dark mode" fetchpriority="high" />
+    </div>
+  </div>
+
+  <!-- how it works -->
+  <section id="how">
+    <div class="wrap">
+      <div class="center"><span class="eyebrow"><svg class="icon"><use href="#i-play"/></svg> How it works</span><h2>From idea to a running flow in minutes</h2></div>
+      <div class="grid steps">
+        <div class="card"><h3>Pick a card, or a template</h3><p>Start from a ready-made flow (nothing to set up) or add cards yourself: a script, a web request, an IF, a file, an AI model.</p></div>
+        <div class="card"><h3>Join them with lines</h3><p>Drag from one card to the next. The output of a card becomes the input of the next, and a line can loop back to repeat work.</p></div>
+        <div class="card"><h3>Press Run and watch</h3><p>Cards light up as they finish. An AI card streams its answer live, and every card keeps what it got and what it made.</p></div>
+      </div>
+    </div>
+  </section>
+
+  <!-- features -->
+  <section id="features" class="band">
+    <div class="wrap">
+      <div class="center"><span class="eyebrow"><svg class="icon"><use href="#i-layers"/></svg> Features</span><h2>Everything runs on your machine</h2>
+        <p class="sub">No account, no cloud. Your flows, connections and texts live in a folder on your computer.</p></div>
+      <div class="grid">
+        <div class="card"><svg class="icon"><use href="#i-bot"/></svg><h3>Local AI with Ollama</h3><p>Ask a model on your own computer (or a server you choose). Its thinking and answer stream live, and you can set how much it reads at once.</p></div>
+        <div class="card"><svg class="icon"><use href="#i-shield"/></svg><h3>AI that acts, inside rules</h3><p>Let a model read and write files, call web APIs or run scripts, only inside a folder and to hosts you allow. An optional second model approves each call. Every call is listed: ran, refused or failed.</p></div>
+        <div class="card"><svg class="icon"><use href="#i-git-branch"/></svg><h3>Branches, loops and data</h3><p>Split a flow with IF, repeat work in a loop, and keep reusable text in a Data card that every card can read by name.</p></div>
+        <div class="card"><svg class="icon"><use href="#i-eye"/></svg><h3>See what every card got</h3><p>The Input and Output tabs list each field with a button that copies the exact reference, so wiring cards together needs no guessing.</p></div>
+        <div class="card"><svg class="icon"><use href="#i-save"/></svg><h3>Templates and backup</h3><p>Start from five ready flows. Back everything up in one click, and restore it on another computer. Restoring never overwrites, and keys are never in the file.</p></div>
+        <div class="card"><svg class="icon"><use href="#i-zap"/></svg><h3>Let an AI assistant build flows</h3><p>Switch on Agent access and an assistant such as Claude Code can create and edit flows for you through the local API. It cannot run anything unless you allow it.</p></div>
+      </div>
+    </div>
+  </section>
+
+  <!-- preview -->
+  <section id="preview">
+    <div class="wrap">
+      <div class="center"><span class="eyebrow"><svg class="icon"><use href="#i-image"/></svg> Preview</span><h2>A quick look around</h2>
+        <p class="sub">Light and dark, the way the app looks on your screen.</p></div>
+      <div class="tabs" role="tablist" aria-label="Screenshots">
+        <button class="tab" role="tab" id="tab-editor" aria-controls="p-editor" aria-selected="true"><svg class="icon"><use href="#i-git-branch"/></svg> Editor</button>
+        <button class="tab" role="tab" id="tab-flows" aria-controls="p-flows" aria-selected="false"><svg class="icon"><use href="#i-layers"/></svg> Flows</button>
+        <button class="tab" role="tab" id="tab-ai-tools" aria-controls="p-ai-tools" aria-selected="false"><svg class="icon"><use href="#i-shield"/></svg> AI tools</button>
+        <button class="tab" role="tab" id="tab-templates" aria-controls="p-templates" aria-selected="false"><svg class="icon"><use href="#i-zap"/></svg> Templates</button>
+        <button class="tab" role="tab" id="tab-agent" aria-controls="p-agent" aria-selected="false"><svg class="icon"><use href="#i-bot"/></svg> Agent access</button>
+      </div>
+
+      <div class="panel" id="p-editor" role="tabpanel" aria-labelledby="tab-editor">
+        <div class="frame"><img class="shot-light" src="screenshots/editor-light.png" width="1280" height="800" loading="lazy" alt="The flow editor after a run" /><img class="shot-dark" src="screenshots/editor-dark.png" width="1280" height="800" loading="lazy" alt="The flow editor after a run, dark" /></div>
+        <p class="caption">Cards joined by lines. Click one to see its input, its output and how long it took.</p>
+      </div>
+      <div class="panel" id="p-flows" role="tabpanel" aria-labelledby="tab-flows" hidden>
+        <div class="frame"><img class="shot-light" src="screenshots/flows-light.png" width="1280" height="800" loading="lazy" alt="The list of flows" /><img class="shot-dark" src="screenshots/flows-dark.png" width="1280" height="800" loading="lazy" alt="The list of flows, dark" /></div>
+        <p class="caption">All your flows in one place: duplicate, switch on, or start a new one from a template.</p>
+      </div>
+      <div class="panel" id="p-ai-tools" role="tabpanel" aria-labelledby="tab-ai-tools" hidden>
+        <div class="frame"><img class="shot-light" src="screenshots/ai-tools-light.png" width="1280" height="800" loading="lazy" alt="An AI card with its tool calls: one write ran, one was refused by the rules" /><img class="shot-dark" src="screenshots/ai-tools-dark.png" width="1280" height="800" loading="lazy" alt="An AI card with its tool calls, dark" /></div>
+        <p class="caption">An AI that may write files, only inside its folder. The write outside it was refused by the rules, and both calls are listed.</p>
+      </div>
+      <div class="panel" id="p-templates" role="tabpanel" aria-labelledby="tab-templates" hidden>
+        <div class="frame"><img class="shot-light" src="screenshots/templates-light.png" width="1280" height="800" loading="lazy" alt="The template picker" /><img class="shot-dark" src="screenshots/templates-dark.png" width="1280" height="800" loading="lazy" alt="The template picker, dark" /></div>
+        <p class="caption">Five ready-made flows. Pick one, choose your Ollama model, and run it.</p>
+      </div>
+      <div class="panel" id="p-agent" role="tabpanel" aria-labelledby="tab-agent" hidden>
+        <div class="frame"><img class="shot-light" src="screenshots/agent-light.png" width="1280" height="800" loading="lazy" alt="Agent access settings" /><img class="shot-dark" src="screenshots/agent-dark.png" width="1280" height="800" loading="lazy" alt="Agent access settings, dark" /></div>
+        <p class="caption">Give an AI assistant the address and token, and it can build flows for you. Running stays your decision.</p>
+      </div>
+    </div>
+  </section>
+
+  <!-- download -->
+  <section id="download" class="band">
+    <div class="wrap">
+      <div class="center"><span class="eyebrow"><svg class="icon"><use href="#i-download"/></svg> Download</span><h2>Get Tammoa</h2>
+        <p class="sub" id="version-line">Free. Choose your system.</p></div>
+      <div class="dl">
+        <div class="card" id="card-mac">
+          <svg class="icon"><use href="#i-laptop"/></svg>
+          <h3>macOS</h3>
+          <span class="meta">Apple Silicon (M1 and newer) · macOS 11 or later · .dmg</span>
+          <a class="btn primary" id="dl-mac" href="#"><svg class="icon"><use href="#i-download"/></svg> Download for macOS</a>
+        </div>
+        <div class="card" id="card-win">
+          <svg class="icon"><use href="#i-monitor"/></svg>
+          <h3>Windows</h3>
+          <span class="meta">Windows 10 or 11, 64-bit · installer (.exe)</span>
+          <a class="btn primary" id="dl-win" href="#"><svg class="icon"><use href="#i-download"/></svg> Download for Windows</a>
+        </div>
+      </div>
+      <div class="note"><svg class="icon"><use href="#i-info"/></svg>
+        <span><strong>First launch warning.</strong> The builds are not code-signed yet, so macOS says "unidentified developer" (right-click the app, choose Open) and Windows SmartScreen asks you to confirm (More info, then Run anyway).</span></div>
+      <p class="fine center"><a href="#" id="all-releases" style="display:inline-flex;align-items:center;gap:6px"><svg class="icon"><use href="#i-code"/></svg> All versions and release notes</a></p>
+    </div>
+  </section>
+
+  <!-- faq -->
+  <section id="faq">
+    <div class="wrap" style="max-width:760px">
+      <div class="center"><span class="eyebrow"><svg class="icon"><use href="#i-help"/></svg> Questions</span><h2>Good to know</h2></div>
+      <details><summary><svg class="icon"><use href="#i-chevron-down"/></svg> Do I need Ollama?</summary><p>Only for the AI cards. Scripts, web requests, files, IF, loops and data cards work without it. For AI, install <strong>Ollama</strong> (ollama.com), download a model, for example <code>ollama pull qwen3:14b</code>, and add its address under Connections.</p></details>
+      <details><summary><svg class="icon"><use href="#i-chevron-down"/></svg> Where is my data?</summary><p>In a folder on your computer (your user data folder, in a "Tammoa" folder). Nothing is sent to a server. The one outside call the app makes is the optional update check, which asks GitHub for the latest release.</p></details>
+      <details><summary><svg class="icon"><use href="#i-chevron-down"/></svg> Can an AI delete my files?</summary><p>Only if you give an AI card the file tools, and then only inside the one folder you choose. Anything outside it is refused by the app itself, before any approver model is asked. The script tool is a best-effort guard, not a sandbox, so keep it off unless you need it.</p></details>
+      <details><summary><svg class="icon"><use href="#i-chevron-down"/></svg> Does it update itself?</summary><p>Not yet. Settings has a "Check for updates" button that tells you when a newer version exists; you download and install it like the first time, and your flows stay as they are.</p></details>
+      <details><summary><svg class="icon"><use href="#i-chevron-down"/></svg> Is there a Linux or Intel Mac build?</summary><p>Not in the downloads yet. The macOS download is for Apple Silicon.</p></details>
+    </div>
+  </section>
+</main>
+
+<footer>
+  <div class="wrap">
+    <span class="brand" style="font-size:15px"><svg class="icon"><use href="#i-git-branch"/></svg> Tammoa</span>
+    <span class="spacer"></span>
+    <a href="#" id="footer-releases"><svg class="icon"><use href="#i-code"/></svg> GitHub releases</a>
+    <a href="#top"><svg class="icon"><use href="#i-play" style="transform:rotate(-90deg);transform-origin:center"/></svg> Back to top</a>
+  </div>
+</footer>
+
+<script>
+  // The only place to change: the GitHub repository the downloads come from (the same one as RepositoryUrl in Tammoa.csproj).
+  var CONFIG = {
+    repo: 'NASAboy342/Tammoa',
+    // which release file is which: the first asset whose name matches
+    assets: { mac: /\.dmg$/i, win: /-setup\.exe$/i },
+  }
+
+  var releasesPage = 'https://github.com/' + CONFIG.repo + '/releases'
+  var latestPage = releasesPage + '/latest'
+  var $ = function (id) { return document.getElementById(id) }
+
+  // theme
+  $('theme').addEventListener('click', function () {
+    var next = document.documentElement.getAttribute('data-theme') === 'dark' ? 'light' : 'dark'
+    document.documentElement.setAttribute('data-theme', next)
+    try { localStorage.setItem('landing-theme', next) } catch (e) {}
+  })
+
+  // screenshot tabs (arrow keys move between them)
+  var tabs = Array.prototype.slice.call(document.querySelectorAll('[role="tab"]'))
+  function selectTab(tab) {
+    tabs.forEach(function (t) {
+      var on = t === tab
+      t.setAttribute('aria-selected', on ? 'true' : 'false')
+      t.tabIndex = on ? 0 : -1
+      $(t.getAttribute('aria-controls')).hidden = !on
+    })
+  }
+  tabs.forEach(function (t, i) {
+    t.addEventListener('click', function () { selectTab(t) })
+    t.addEventListener('keydown', function (e) {
+      var j = e.key === 'ArrowRight' ? i + 1 : e.key === 'ArrowLeft' ? i - 1 : -1
+      if (j < 0) return
+      var next = tabs[(j + tabs.length) % tabs.length]
+      selectTab(next); next.focus()
+    })
+  })
+  selectTab(tabs[0])
+
+  // downloads: work without JavaScript or network (the links go to the releases page); with a release, they go straight to the file
+  var macLink = $('dl-mac'), winLink = $('dl-win')
+  ;[macLink, winLink, $('all-releases'), $('footer-releases')].forEach(function (a) { a.href = latestPage })
+  $('all-releases').href = releasesPage
+  $('footer-releases').href = releasesPage
+
+  var isWin = /Windows/i.test(navigator.userAgent), isMac = /Macintosh|Mac OS X/i.test(navigator.userAgent)
+  var mine = isWin ? 'win' : isMac ? 'mac' : null
+  if (mine) {
+    $('card-' + mine).classList.add('rec')
+    $('hero-label').textContent = 'Download for ' + (mine === 'win' ? 'Windows' : 'macOS')
+  }
+
+  fetch('https://api.github.com/repos/' + CONFIG.repo + '/releases/latest', { headers: { Accept: 'application/vnd.github+json' } })
+    .then(function (r) { if (!r.ok) throw new Error(r.status); return r.json() })
+    .then(function (release) {
+      var find = function (re) { return (release.assets || []).filter(function (a) { return re.test(a.name) })[0] }
+      var mac = find(CONFIG.assets.mac), win = find(CONFIG.assets.win)
+      if (mac) macLink.href = mac.browser_download_url
+      if (win) winLink.href = win.browser_download_url
+      var mine_ = mine === 'win' ? win : mine === 'mac' ? mac : null
+      if (mine_) $('hero-download').href = mine_.browser_download_url
+      var when = release.published_at ? new Date(release.published_at).toLocaleDateString(undefined, { year: 'numeric', month: 'long', day: 'numeric' }) : ''
+      $('version-line').textContent = 'Latest version: ' + (release.tag_name || '') + (when ? ' · ' + when : '') + ' · free'
+      $('hero-fine').textContent = 'Version ' + (release.tag_name || '').replace(/^v/, '') + ' · free · macOS (Apple Silicon) and Windows'
+    })
+    .catch(function () { /* offline, rate-limited or no release yet: the links keep pointing at the releases page */ })
+</script>
+</body>
+</html>

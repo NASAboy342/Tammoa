@@ -141,5 +141,11 @@ The Windows `AppId` GUID in `windows-installer.iss` identifies the app for upgra
 - **No in-app update yet:** *Check for updates* tells the user a newer release exists; they download and install it themselves. Installing over the old version keeps their data (it lives in the user data folder, not the install folder).
 - Not yet exercised in CI: the Windows build and the tag-triggered release (the macOS package was built and run locally: UI, API, database and a template flow all worked).
 
+## Landing page
+`Landing/index.html` is a single static page (open it with `open Landing/index.html`) that matches the app's look (same colour tokens, light and dark, follows the system setting, has a switch), previews the app with screenshots and offers the downloads. The download buttons start on the GitHub releases page and, when the visitor is online, are upgraded to the real files of the latest release (it reads `releases/latest` from the GitHub API; the repository and the file-name patterns are at the top of the `<script>`: `CONFIG.repo`, `CONFIG.assets`, which must match what `scripts/package-*` produce). Keep the unsigned-build note next to the download until the builds are signed.
+- **Screenshots** (`Landing/screenshots/<name>-light.png` / `-dark.png`, 1280x800) are made by `Tammoa/UserInterface/e2e/landing-screenshots.spec.ts`, which seeds **invented demo flows** and a fake Ollama (never real data). It is skipped unless `LANDING=1`, and refuses to run unless the data folder is empty: start the backend on a fresh `TAMMOA_DATA_DIR`, then `cd Tammoa/UserInterface && LANDING=1 npx playwright test e2e/landing-screenshots.spec.ts --project=chromium`. Re-shoot when the UI changes noticeably, then look at every image.
+- **Check the page:** the `create-landing-page` skill's `check-landing.mjs` (no console errors, no overflow on a phone, an icon in every clickable, no broken image, tabs work).
+- Not published anywhere yet: hosting (for example GitHub Pages from the `Landing/` folder) is a separate step.
+
 ## Versioning
 Single source of truth: `<Version>` in `Tammoa/Tammoa.csproj` — frontend `package.json` version is not used.
